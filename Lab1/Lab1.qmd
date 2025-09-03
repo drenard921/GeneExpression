@@ -1,0 +1,118 @@
+---
+title: "Lab 1 - Basic R Syntax and Plots"
+Author: "Dylan Renard"
+output: pdf_document
+format:
+  html:
+    toc: true
+    code-fold: show
+    self-contained: true
+  pdf: default
+---
+
+#### Dylan Renard  
+#### Professor Brandon Higgs  
+#### Gene Expression and Data Visualization  
+#### Johns Hopkins University  
+#### September 2nd, 2025
+
+
+# Lab 1:
+For this lab, we will be using some basic data manipulation and plotting commands in R.  We are working with a data set that is comparing the transcript profiles from peripheral B lymphocytes between patients with systemic lupus erythematosus (SLE) and normal healthy controls.  The GEO summary of the data set is as follows: 
+
+Systemic lupus erythematosus (SLE) is an autoimmune disease with an important clinical and biological heterogeneity. B lymphocytes appear central to the development of SLE which is characterized by the production of a large variety of autoantibodies and hypergammaglobulinemia. In mice, immature B cells from spontaneous lupus prone animals are able to produce autoantibodies when transferred into immunodeficient mice, strongly suggesting the existence of intrinsic B cell defects during lupus. In order to approach these defects in humans, we compared the peripheral B cell transcriptomes of quiescent lupus patients to normal B cell transcriptomes.  
+
+## Q1) Data Setup and Loading appropriate libraries
+```{r}
+#| label: setup
+# Load core library for visualization
+library(ggplot2)
+```
+
+## Q2) Unzip the text file, and read into R 
+```{r}
+data <- read.table("sle_b_cell.txt", 
+                  header = TRUE, 
+                  row.names = 1)
+
+# Extract the first row
+head(data, 1)
+
+```
+## Q3) Look at the dimensions of the data.  There should be 26 samples.
+```{r}
+dim(data)
+```
+
+## Q4) Print the sample names to screen.
+```{r}
+colnames(data)
+```
+
+## Q5) Basic Scatter Plot across two patients
+Plot the second SLE patient sample versus the first normal control samples in an xy scatter plot.  Remember that the first argument is the x vector.  Label the x and y-axes as 'Normal' and 'SLE', respectively.  Title the plot, 'SLE B cell sample vs. Normal B cell sample – all probesets'.  Add grey grid lines with the function grid(). 
+```{r}
+# Selecting Subsets of Data
+normal1 <- data[, 1]   # first normal control sample
+sle2    <- data[, 10]  # second SLE patient sample
+
+# Scatter plot 
+plot(normal1, sle2, 
+          xlab = "Normal", ylab = "SLE", 
+          main = "SLE B cell sample vs. Normal B cell sample – all probesets", 
+          pch = 16, col = "black") 
+        # Add grey grid lines 
+        grid(col = "grey")
+```
+
+## Q6) Now do the same plot but pick only the first 20 probesets.  
+Use the pch=15 argument to change the shape and color the points blue with the col argument.   
+```{r}
+
+# First normal control and second SLE sample
+normal1 <- data[1:20, 1]   # first 20 rows of Normal sample
+sle2    <- data[1:20, 10]  # first 20 rows of SLE sample
+
+plot(normal1, sle2,
+     xlab = "Normal",
+     ylab = "SLE",
+     main = "SLE B cell sample vs. Normal B cell sample – first 20 probesets",
+     pch = 15,           # solid square
+     col = "blue")       # color the points blue
+
+grid(col = "grey")
+```
+
+## Q7) Now plot the following gene in a gene profile plot, IGLJ3 (immunoglobulin lambda joining 3)
+which is probeset ID 211881_x_at.  This type of plot has the sample indices across the x-axis and the intensities on the y-axis, so you can see a profile of the gene across experiments or arrays.  First plot the ranges using the type=”n” argument and the plot() function, then add the genes with the lines() function call.  Add grid lines.
+```{r}
+# Extract the expression values for IGLJ3
+gene_id <- "211881_x_at"
+igl_values <- as.numeric(data[gene_id, ])
+
+# X-axis = sample indices (1 through 26)
+x_vals <- 1:ncol(data)
+
+# Set up the plot ranges with type = "n" (draws axes but no points/lines yet)
+plot(range(x_vals), 
+     range(igl_values), 
+     type = "n",
+     xlab = "Sample Index",
+     ylab = "Expression Intensity",
+     main = paste("Gene Profile:", gene_id))
+
+# Add the line plot for IGLJ3
+lines(x_vals, igl_values, col = "blue", lwd = 2)
+
+# Add grid lines
+grid(col = "grey")
+
+```
+
+## Sources:
+
+::: {#refs}
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis.  Springer-Verlag New York, 2016.
+
+R Core Team (2025). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria.   URL https://www.R-project.org/.
+:::
