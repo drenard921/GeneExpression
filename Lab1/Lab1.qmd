@@ -109,6 +109,36 @@ grid(col = "grey")
 
 ```
 
+## Q8) Box Plot question
+```{r}
+
+## Q8 — Boxplot of IGLJ3 (211881_x_at) across SLE vs Control
+## Rows = genes (probesets), cols = samples; SLE first (17), then Control (9)
+
+gene_probe <- "211881_x_at"
+
+# Expression vector for IGLJ3 across all 26 samples (columns)
+y <- as.numeric(data[gene_probe, ])
+
+# Condition factor: 17 SLE first, then 9 Control (and show SLE first on the x-axis)
+f <- factor(c(rep("SLE", 17), rep("Control", 9)),
+            levels = c("SLE", "Control"))
+
+# Align lengths and drop any NAs
+y <- y[seq_len(length(f))]
+keep <- !is.na(y)
+y <- y[keep]; f <- f[keep]
+
+# Boxplot + optional stripchart overlay
+boxplot(y ~ f,
+        xlab = "Condition",
+        ylab = "IGLJ3 Expression",
+        main = "Q8: IGLJ3 (211881_x_at) — SLE vs Control")
+
+with(data.frame(y, f),
+     stripchart(y ~ f, method = "jitter", vertical = TRUE, pch = 16, add = TRUE))
+```
+
 ## Sources:
 
 ::: {#refs}
