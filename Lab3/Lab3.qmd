@@ -1,0 +1,63 @@
+---
+title: "Lab 3- Power Statistics"
+Author: "Dylan Renard"
+output: pdf_document
+format:
+  html:
+    toc: true
+    code-fold: show
+    self-contained: true
+  pdf: default
+---
+
+#### Dylan Renard  
+#### Professor Brandon Higgs  
+#### Gene Expression and Data Visualization  
+#### Johns Hopkins University  
+#### September 16th, 2025
+
+## Lab 3:
+In this lab, we are working with a data set from Alizadeh et al. at Stanford.  In this study, the investigators were evaluating diffuse large B-cell lymphoma (DLBCL).  Using expression profiling and hierarchical clustering (a topic that we will visit later in this class), they were able to identify 2 distinct forms of DLBCL that indicate different stages of B-cell differentiation.  “One type expressed genes characteristic of germinal centre B cells (‘germinal centre B-like DLBCL’); the second type expressed genes normally induced during in vitro activation of peripheral blood B cells (‘activated B-like DLBCL’).”  They also found that the germinal centre B-like DLBCL patients had a better survival rate.
+
+We will use this data set to evaluate the power and sample size in this experiment.  We will also look for the necessary number of samples to appropriately power the study.  First we will calculate the power and n required using a single gene calculation for illustration of the formula, then we will conduct a more multivariate summary that gives an idea of the power or n required for a specific percentage of genes/probes in the experiment.  Remember that when we calculate these statistics for a microarray, we are dealing with more than a single variable, so general power formulas do not apply when attempting to summarize all genes/probes on an array.
+
+The paper entitled “Distinct type of diffuse large B-cell lymphoma identified by gene expression profiling” can be found on the course website.
+
+
+## Q1) Download the Eisen DLBCL data set and save as a text file (go to class web site or see syllabus for paper URL).
+
+## Q2) Load into R, using read.table and arguments:
+
+## Q3) Get the class label file "eisenClasses.txt" from the class web site and read it into R.  Use the header=T argument. 
+
+## Q4) Subset the data frame with the class labels and look at the positions so you know where one class ends and the other begins.
+Remember that ‘subset’ means to re-index (i.e. reorder) the column headers.  If you look at the original column name order with dimnames(dat)[[2]] both before and after you reorder them, you will see what this has done.
+
+## Q5) Pick a gene, remove cells that have "NAs", and plot the values for both classes with a:
+- boxplot (use the argument col=c(“red”,”blue”) to color separate boxes)
+- histogram (this should have 2 separate histogram plots on 1 page; use the  par(mfrow=c(2,1)) function prior to plotting the first).
+- Color each class something different in the boxplot and histogram.
+
+## Q6) Calculate the pooled variance as coded in the lecture notes, and calculate the minimum sample size necessary to detect a 1.5 fold difference (at 80% power and 99% confidence).
+
+## Q7) Now calculate the sample size required for the same gene selected in #5 using the empirically determined delta between the two groups, assuming 99% confidence and 80% power.
+
+## Q8) Now load the ssize and gdata libraries, calculate the standard deviation for each gene in the matrix (Hint: use the na.rm=T argument), and plot a histogram of the standard deviations.  Label the plot accordingly.
+
+## Q9) Calculate and plot a proportion of genes vs. sample size graph to get an idea of the number of genes that have an adequate sample size for confidence=95%, effect size=3 (log2 transform for the function), and power=80%.
+
+
+## Sources:
+
+::: {#refs}
+Chang W, Cheng J, Allaire J, Sievert C, Schloerke B, Xie Y, Allen J,
+  McPherson J, Dipert A, Borges B (2025). _shiny: Web Application
+  Framework for R_. R package version 1.11.1,
+  <https://CRAN.R-project.org/package=shiny>.
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis.  Springer-Verlag New York, 2016.
+
+R Core Team (2025). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria. <https://www.R-project.org/>.
+
+Spellman, P. T., Sherlock, G., Zhang, M. Q., Iyer, V. R., Anders, K., Eisen, M. B., Brown, P. O., Botstein, D., & Futcher, B. (1998). Comprehensive identification of cell cycle-regulated genes of the yeast Saccharomyces cerevisiae by microarray hybridization. Molecular biology of the cell, 9(12), 3273–3297. <https://doi.org/10.1091/mbc.9.12.3273>
+:::
