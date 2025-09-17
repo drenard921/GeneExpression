@@ -24,40 +24,359 @@ We will use this data set to evaluate the power and sample size in this experime
 The paper entitled “Distinct type of diffuse large B-cell lymphoma identified by gene expression profiling” can be found on the course website.
 
 
-## Q1) Download the Eisen DLBCL data set and save as a text file (go to class web site or see syllabus for paper URL).
+## Q1) Download the EisenDLBCL data set and save as a text file (go to class web site or see syllabus for paper URL).
+
+```{r}
+# Install/load DT if needed
+if (!requireNamespace("DT", quietly = TRUE)) {
+  install.packages("DT")
+}
+
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+BiocManager::install("ssize")
+BiocManager::install("gdata")
+
+library(DT)
+library(ssize)
+library(gdata)
+```
 
 ## Q2) Load into R, using read.table and arguments:
 
-## Q3) Get the class label file "eisenClasses.txt" from the class web site and read it into R.  Use the header=T argument. 
+```{r}
+# Load Eisen DLBCL dataset
+data <- read.table(
+  "eisen.txt",
+  header = TRUE,
+  na.strings = "NA",
+  blank.lines.skip = FALSE,
+  row.names = 1,
+  check.names = FALSE
+)
+
+# Inspect dimensions and first few samples
+dim(data)
+head(data[, 1:5])
+```
+
+### Interpretation (Q2)
+
+The Eisen dataset loaded as a genes (rows) × samples (columns) expression matrix with explicit `NA` values, which is expected for cDNA microarrays. The dimensions confirm we have thousands of probes across ~40 DLBCL samples, providing a suitable basis for downstream comparisons between the two biological subtypes. Missing values will be handled explicitly (`na.rm=TRUE`) in subsequent variance and power calculations to avoid bias.
+
+
+## Q3) Get the class label file "eisenClasses.txt" from the class web site and read it into R.  Use the header=T argument.
+```{r}
+# Load Eisen class labels
+classes <- read.table("eisenClasses.txt", header = TRUE, sep = "\t")
+
+# Preview contents
+head(classes, 10)
+table(classes$class)
+```
+
+### Interpretation (Q3)
+
+The class label file was read successfully and aligned with the expression data. Each sample was assigned to one of two groups: germinal center B-like DLBCL (Class 1) or activated B-like DLBCL (Class 2). Confirming the counts shows approximately equal group sizes, which supports balanced downstream comparisons. Having the labels explicitly linked to the data matrix ensures that subsequent variance and power calculations reflect biologically meaningful subtypes rather than arbitrary partitions.
+
 
 ## Q4) Subset the data frame with the class labels and look at the positions so you know where one class ends and the other begins.
 Remember that ‘subset’ means to re-index (i.e. reorder) the column headers.  If you look at the original column name order with dimnames(dat)[[2]] both before and after you reorder them, you will see what this has done.
 
-## Q5) Pick a gene, remove cells that have "NAs", and plot the values for both classes with a:
+```{r}
+## Q4 — Subset the data with class labels and find where Class 1 ends
+
+# Step 1: Clean up names
+# Remove stray spaces and convert factors to plain character vectors
+colnames(data)   <- trimws(colnames(data))
+classes$sample   <- trimws(as.character(classes$sample))
+
+# Step 2: Standardize naming format between the two files
+#   - eisen.txt uses "DLCL-0001"
+#   - eisenClasses.txt uses "DLCL.0001"
+#   → convert class file names to the hyphen style with zero-padding
+map_to_hyphen <- function(x) {
+  x <- gsub("\\.", "-", x)              # change dot to hyphen
+  num <- sub("^.*?(\\d+)$", "\\1", x)   # extract trailing digits
+  paste0("DLCL-", sprintf("%04d", as.integer(num)))  # reformat with 4 digits
+}
+classes$sample_std <- map_to_hyphen(classes$sample)
+
+# Step 3: Keep only overlapping samples
+# Intersect ensures we only keep samples that exist in both datasets
+keep <- intersect(classes$sample_std, colnames(data))
+stopifnot(length(keep) > 0)  # fail if nothing matches
+
+# Step 4: Reorder columns by class, then sample
+classes_sub <- classes[classes$sample_std %in% keep, ]
+ord <- order(classes_sub$class, classes_sub$sample_std)
+classes_ord <- classes_sub[ord, ]
+
+# Reindex the data matrix so columns match the ordered class list
+data_re <- data[, classes_ord$sample_std, drop = FALSE]
+
+# Step 5: Find the boundary (last column of Class 1)
+split_point <- sum(classes_ord$class == 1)
+
+# Step 6: Output checks
+cat("Split point (last Class 1 column):", split_point, "of", ncol(data_re), "\n")
+print(table(classes_ord$class))       # count of each class
+head(colnames(data_re))               # first few sample IDs
+tail(colnames(data_re))               # last few sample IDs
+
+```
+
+### Interpretation (Q4)
+
+After reordering the dataset by class labels, all germinal center B-like (Class 1) samples are grouped first, followed by all activated B-like (Class 2) samples. Identifying the split point provides a clear boundary between the two subtypes, which is critical for class-based comparisons. This step ensures that downstream analyses, such as boxplots, variance calculations, and power estimates, correctly align with the biological groupings defined in the original study.
+
+
+## Q5) Pick a gene, remove cells that have "NAs", and plot the values for both classes with the following:
 - boxplot (use the argument col=c(“red”,”blue”) to color separate boxes)
 - histogram (this should have 2 separate histogram plots on 1 page; use the  par(mfrow=c(2,1)) function prior to plotting the first).
 - Color each class something different in the boxplot and histogram.
 
+```{r}
+## Q5 — Use UID row 921, clean NAs, and plot
+
+# ---- Class indices ----
+cls1_idx <- which(classes_ord$class == 1)  # GC B-like
+cls2_idx <- which(classes_ord$class == 2)  # Activated B-like
+
+# ---- Pick UID row 921 ----
+gene_id <- rownames(data_re)[921]   # 921st row in the matrix
+cat("Using gene_id:", gene_id, "\n")
+
+# ---- Extract values, drop NAs ----
+g1 <- as.numeric(data_re[gene_id, cls1_idx]); g1 <- g1[!is.na(g1)]
+g2 <- as.numeric(data_re[gene_id, cls2_idx]); g2 <- g2[!is.na(g2)]
+
+# ---- Basic stats ----
+cat("Class 1 (GC B-like): n=", length(g1),
+    " mean=", round(mean(g1),3),
+    " sd=", round(sd(g1),3), "\n", sep="")
+cat("Class 2 (Activated): n=", length(g2),
+    " mean=", round(mean(g2),3),
+    " sd=", round(sd(g2),3), "\n", sep="")
+
+# ---- Boxplot ----
+par(mar = c(4,4,2,1))
+boxplot(
+  list(`GC B-like DLBCL` = g1,
+       `Activated B-like DLBCL` = g2),
+  col = c("red","blue"),
+  ylab = "Expression",
+  main = paste("Gene (UID row 921):")
+)
+
+# ---- Histograms ----
+op <- par(mfrow=c(2,1), mar=c(4,4,2,1))
+hist(g1, breaks="FD", col="red",
+     main="Histogram — GC B-like DLBCL", xlab="Expression")
+hist(g2, breaks="FD", col="blue",
+     main="Histogram — Activated B-like DLBCL", xlab="Expression")
+par(op)
+```
+
+### Interpretation (Q5)
+
+The boxplot and histograms for Gene 921 highlight subtle but measurable differences in expression between the two DLBCL subtypes. Germinal center B-like samples (red) cluster around slightly lower values, while activated B-like samples (blue) tend to shift upward, with a higher median and broader spread. The overlap between distributions indicates that this single gene does not completely separate the groups, but the shift in central tendency suggests there is a non-trivial effect size. These descriptive plots provide an initial visualization of the variance structure that underpins the formal power and sample size calculations in Q6 and Q7.
+
+
+
 ## Q6) Calculate the pooled variance as coded in the lecture notes, and calculate the minimum sample size necessary to detect a 1.5 fold difference (at 80% power and 99% confidence).
 
+```{r}
+# ---- Extract values (UID row 921, already chosen in Q5) ----
+g1 <- as.numeric(data_re[gene_id, cls1_idx]); g1 <- g1[!is.na(g1)]
+g2 <- as.numeric(data_re[gene_id, cls2_idx]); g2 <- g2[!is.na(g2)]
+
+n1 <- length(g1); n2 <- length(g2)
+s1 <- var(g1);   s2 <- var(g2)
+
+# ---- Step 1: pooled variance ----
+sp2 <- ((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2)
+
+# ---- Step 2: delta (1.5-fold, log2 scale) ----
+delta <- log2(1.5)
+
+# ---- Step 3: z-values for 99% confidence (alpha=0.01) & 80% power ----
+alpha <- 0.01
+power <- 0.80
+z_alpha <- qnorm(1 - alpha/2)
+z_beta  <- qnorm(power)
+
+# ---- Step 4: required sample size per group ----
+n_per_group <- ceiling( (2 * (z_alpha + z_beta)^2 * sp2) / (delta^2) )
+
+# ---- Collect results in a data frame ----
+res_q6 <- data.frame(
+  Metric = c("Class 1 n", "Class 2 n", "Variance (Class 1)", "Variance (Class 2)",
+             "Pooled variance (sp²)", "Delta (log2(1.5))", 
+             "Alpha (99% conf.)", "Power (80%)",
+             "Required n per group"),
+  Value  = c(n1, n2, round(s1, 4), round(s2, 4),
+             round(sp2, 4), round(delta, 4),
+             alpha, power, n_per_group)
+)
+
+# ---- Render as DT table ----
+datatable(res_q6, 
+          rownames = FALSE,
+          options = list(dom = 't',  # show only table
+                         columnDefs = list(list(className = 'dt-center', targets = "_all"))))
+```
+
+### Interpretation (Q6)
+
+Using Gene 921, the pooled variance across the two subtypes was estimated at 0.0697. Applying the target effect size of a 1.5-fold change (log2 scale = 0.585), the power calculation indicates that only **5 samples per group** are required to achieve 80% power at a stringent 99% confidence level. This result demonstrates that, given the relatively low variance observed for this gene, even a modest sample size is sufficient to detect biologically meaningful differences between germinal center B-like and activated B-like subtypes. In practice, this underscores how variance strongly influences study design: genes with smaller variability require fewer samples to reach adequate power.
+
+
 ## Q7) Now calculate the sample size required for the same gene selected in #5 using the empirically determined delta between the two groups, assuming 99% confidence and 80% power.
+```{r}
+## Q7 — Sample size using empirical delta (Gene 921) — SIMPLE + OBVIOUS
+
+# 1) Pull values for row 921 and drop NAs
+g1 <- as.numeric(data_re[921, cls1_idx]); g1 <- g1[!is.na(g1)]
+g2 <- as.numeric(data_re[921, cls2_idx]); g2 <- g2[!is.na(g2)]
+
+# 2) Stats
+n1 <- length(g1); n2 <- length(g2)
+m1 <- mean(g1);   m2 <- mean(g2)
+s1 <- var(g1);    s2 <- var(g2)
+
+# 3) Pooled variance and empirical delta
+sp2 <- ((n1 - 1)*s1 + (n2 - 1)*s2) / (n1 + n2 - 2)
+delta_emp <- abs(m1 - m2)
+
+# 4) Settings and Zs
+alpha <- 0.01; power <- 0.80
+z_alpha <- qnorm(1 - alpha/2)
+z_beta  <- qnorm(power)
+
+# 5) Required n per group
+q7_required_n_per_group <- ceiling( 2 * (z_alpha + z_beta)^2 * sp2 / (delta_emp^2) )
+
+# 6) SHOUT IT FROM THE ROOFTOPS
+cat("\n==================== Q7 RESULT ====================\n")
+cat("Required n per group (99% conf, 80% power) for Gene 921: ",
+    q7_required_n_per_group, "\n")
+cat("===================================================\n\n", sep="")
+
+# 7) Always-visible plain table (no DT)
+res_q7_plain <- data.frame(
+  Metric = c("Gene", "Class 1 n", "Class 2 n",
+             "Mean (Class 1)", "Mean (Class 2)",
+             "Empirical delta |m1 - m2|",
+             "Variance (Class 1)", "Variance (Class 2)",
+             "Pooled variance (sp^2)",
+             "Alpha", "Power",
+             "Required n per group"),
+  Value  = c("Gene 921", n1, n2,
+             round(m1, 4), round(m2, 4),
+             round(delta_emp, 4),
+             round(s1, 4), round(s2, 4),
+             round(sp2, 4),
+             alpha, power,
+             q7_required_n_per_group)
+)
+knitr::kable(res_q7_plain, align = "c")
+
+
+
+```
+
+### Interpretation (Q7)
+
+For Gene 921, the empirically observed mean difference between germinal center B-like and activated B-like samples was only 0.127 on the log2 scale. With a pooled variance of 0.0697, this small effect size dramatically increases the required sample size compared to the fixed 1.5-fold scenario in Q6. Specifically, **102 samples per group** would be necessary to achieve 80% power at 99% confidence. This contrast highlights a key principle in study design: theoretical fold-change thresholds may suggest modest sample needs, but when the true biological difference is small, substantially larger cohorts are required to detect it with confidence.
+
 
 ## Q8) Now load the ssize and gdata libraries, calculate the standard deviation for each gene in the matrix (Hint: use the na.rm=T argument), and plot a histogram of the standard deviations.  Label the plot accordingly.
+```{r}
+## Q8 — Standard deviations across all genes
+
+# ---- Calculate standard deviation per gene ----
+gene_sds <- apply(data_re, 1, sd, na.rm = TRUE)
+
+# ---- Plot histogram ----
+hist(gene_sds,
+     breaks = 50,
+     main = "Histogram of Gene Standard Deviations",
+     xlab = "Standard Deviation",
+     col = "lightblue", border = "black")
+
+# ---- Print summary stats ----
+summary(gene_sds)
+```
+
+### Interpretation (Q8)
+
+The histogram of gene-level standard deviations shows a right-skewed distribution, with most genes exhibiting moderate variability. The median standard deviation is ~0.59, while the mean is slightly higher at 0.64, reflecting the long right tail of more variable genes. A small subset of genes have standard deviations above 1.5, indicating much higher expression variability across samples. These results highlight that while many genes are relatively stable, a fraction display substantial dispersion, which will influence power calculations in Q9: genes with lower variance require fewer samples to achieve adequate power, whereas high-variance genes demand larger sample sizes.
+
 
 ## Q9) Calculate and plot a proportion of genes vs. sample size graph to get an idea of the number of genes that have an adequate sample size for confidence=95%, effect size=3 (log2 transform for the function), and power=80%.
+
+```{r}
+## Q9 — Proportion of genes vs. sample size (95% conf., power=80%, Δ=log2(3))
+
+# ---- Inputs for the power calc ----
+alpha <- 0.05             # 95% confidence → two-sided alpha
+power <- 0.80
+delta <- log2(3)          # effect size on log2 scale
+
+z_alpha <- qnorm(1 - alpha/2)
+z_beta  <- qnorm(power)
+
+# ---- Per-gene SDs (reuse from Q8 or compute here) ----
+if (!exists("gene_sds")) {
+  gene_sds <- apply(data_re, 1, sd, na.rm = TRUE)
+}
+# Remove NAs in SD (all-missing rows, etc.)
+gene_sds <- gene_sds[!is.na(gene_sds)]
+
+# ---- Required n per group for each gene (approx. sp^2 ≈ sd^2) ----
+sp2_vec <- gene_sds^2
+n_required <- 2 * ((z_alpha + z_beta)^2 * sp2_vec) / (delta^2)
+
+# Clean up: ceiling to integers, at least 2 per group
+n_required <- pmax(2, ceiling(n_required))
+
+# ---- Build the curve: proportion powered at or below candidate n ----
+# Grid of candidate sample sizes per group (tweak upper bound if needed)
+grid_n <- sort(unique(c(2:60, quantile(n_required, probs = seq(0, 1, 0.1)))))
+grid_n <- unique(ceiling(grid_n))
+
+prop_ok <- sapply(grid_n, function(n) mean(n_required <= n))
+
+# ---- Plot ----
+plot(grid_n, prop_ok, type = "l", lwd = 2,
+     xlab = "Sample size per group (n)",
+     ylab = "Proportion of genes adequately powered",
+     main = "Proportion of Genes vs. Sample Size\n(95% conf., 80% power, Δ = log2(3))")
+abline(h = seq(0, 1, 0.1), v = seq(5, max(grid_n), by = 5), col = "gray90", lty = 3)
+
+# ---- Quick textual summary (optional) ----
+cat("Q9 summary:\n",
+    "Total genes used:", length(n_required), "\n",
+    "Median required n per group:", median(n_required), "\n",
+    "n to power 50% of genes:", grid_n[which.min(abs(prop_ok - 0.5))], "\n",
+    "n to power 80% of genes:", grid_n[which.min(abs(prop_ok - 0.8))], "\n")
+
+```
+
+### Interpretation (Q9)
+
+The proportion vs. sample size curve shows how quickly power is achieved across the Eisen dataset. With an effect size of log2(3), 95% confidence, and 80% power, the analysis indicates that the majority of genes require only a small sample size. Specifically, the median required sample size is 3 per group, 50% of genes are adequately powered with just 2 samples per group, and 80% are powered with 4 samples per group. The steep initial rise of the curve reflects that most genes have relatively low variance, allowing small cohorts to provide high power. This highlights the efficiency of detecting large effect sizes in microarray experiments, though in practice additional samples would be advisable to account for heterogeneity, missing data, and multiple testing corrections.
+
 
 
 ## Sources:
 
 ::: {#refs}
-Chang W, Cheng J, Allaire J, Sievert C, Schloerke B, Xie Y, Allen J,
-  McPherson J, Dipert A, Borges B (2025). _shiny: Web Application
-  Framework for R_. R package version 1.11.1,
-  <https://CRAN.R-project.org/package=shiny>.
 
-H. Wickham. ggplot2: Elegant Graphics for Data Analysis.  Springer-Verlag New York, 2016.
+Alizadeh AA, Eisen MB, Davis RE, Ma C, Lossos IS, Rosenwald A, Boldrick JC, Sabet H, Tran T, Yu X, Powell JI, Yang L, Marti GE, Moore T, Hudson J Jr, Lu L, Lewis DB,     Tibshirani  R, Sherlock G, Chan WC, Greiner TC, Weisenburger DD, Armitage JO, Warnke R, Levy R, Wilson W, Grever MR, Byrd JC, Botstein D, Brown PO, Staudt LM. Distinct types of diffuse large B-cell lymphoma identified by gene expression profiling. Nature. 2000 Feb 3;403(6769):503-11. doi: 10.1038/35000501. PMID: 10676951. 
+
 
 R Core Team (2025). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria. <https://www.R-project.org/>.
-
-Spellman, P. T., Sherlock, G., Zhang, M. Q., Iyer, V. R., Anders, K., Eisen, M. B., Brown, P. O., Botstein, D., & Futcher, B. (1998). Comprehensive identification of cell cycle-regulated genes of the yeast Saccharomyces cerevisiae by microarray hybridization. Molecular biology of the cell, 9(12), 3273–3297. <https://doi.org/10.1091/mbc.9.12.3273>
 :::
