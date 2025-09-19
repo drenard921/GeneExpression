@@ -26,7 +26,7 @@ The paper entitled “Distinct type of diffuse large B-cell lymphoma identified 
 
 ## Q1) Download the EisenDLBCL data set and save as a text file (go to class web site or see syllabus for paper URL).
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
 # Install/load DT if needed
 if (!requireNamespace("DT", quietly = TRUE)) {
   install.packages("DT")
@@ -138,7 +138,7 @@ After reordering the dataset by class labels, all germinal center B-like (Class 
 - Color each class something different in the boxplot and histogram.
 
 ```{r}
-## Q5 — Use UID row 921, clean NAs, and plot
+## Q5 — Use UID 1170 row 921, clean NAs, and plot
 
 # ---- Class indices ----
 cls1_idx <- which(classes_ord$class == 1)  # GC B-like
@@ -167,7 +167,7 @@ boxplot(
        `Activated B-like DLBCL` = g2),
   col = c("red","blue"),
   ylab = "Expression",
-  main = paste("Gene (UID row 921):")
+  main = paste("Gene UID 1170: Row 921")
 )
 
 # ---- Histograms ----
@@ -181,7 +181,7 @@ par(op)
 
 ### Interpretation (Q5)
 
-The boxplot and histograms for Gene 921 highlight subtle but measurable differences in expression between the two DLBCL subtypes. Germinal center B-like samples (red) cluster around slightly lower values, while activated B-like samples (blue) tend to shift upward, with a higher median and broader spread. The overlap between distributions indicates that this single gene does not completely separate the groups, but the shift in central tendency suggests there is a non-trivial effect size. These descriptive plots provide an initial visualization of the variance structure that underpins the formal power and sample size calculations in Q6 and Q7.
+The boxplot and histograms for gene with UID 1170 (row 921) highlight subtle but measurable differences in expression between the two DLBCL subtypes. Germinal center B-like samples (red) cluster around slightly lower values, while activated B-like samples (blue) tend to shift upward, with a higher median and broader spread. The overlap between distributions indicates that this single gene does not completely separate the groups, but the shift in central tendency suggests there is a non-trivial effect size. These descriptive plots provide an initial visualization of the variance structure that underpins the formal power and sample size calculations in Q6 and Q7.
 
 
 
@@ -230,12 +230,12 @@ datatable(res_q6,
 
 ### Interpretation (Q6)
 
-Using Gene 921, the pooled variance across the two subtypes was estimated at 0.0697. Applying the target effect size of a 1.5-fold change (log2 scale = 0.585), the power calculation indicates that only **5 samples per group** are required to achieve 80% power at a stringent 99% confidence level. This result demonstrates that, given the relatively low variance observed for this gene, even a modest sample size is sufficient to detect biologically meaningful differences between germinal center B-like and activated B-like subtypes. In practice, this underscores how variance strongly influences study design: genes with smaller variability require fewer samples to reach adequate power.
+Using gene with UID 1170 (row 921), the pooled variance across the two subtypes was estimated at 0.0697. Applying the target effect size of a 1.5-fold change (log2 scale = 0.585), the power calculation indicates that only **5 samples per group** are required to achieve 80% power at a stringent 99% confidence level. This result demonstrates that, given the relatively low variance observed for this gene, even a modest sample size is sufficient to detect biologically meaningful differences between germinal center B-like and activated B-like subtypes. In practice, this underscores how variance strongly influences study design: genes with smaller variability require fewer samples to reach adequate power.
 
 
 ## Q7) Now calculate the sample size required for the same gene selected in #5 using the empirically determined delta between the two groups, assuming 99% confidence and 80% power.
 ```{r}
-## Q7 — Sample size using empirical delta (Gene 921) — SIMPLE + OBVIOUS
+## Q7 — Sample size using empirical delta (gene with UID 1170 (row 921)) — SIMPLE + OBVIOUS
 
 # 1) Pull values for row 921 and drop NAs
 g1 <- as.numeric(data_re[921, cls1_idx]); g1 <- g1[!is.na(g1)]
@@ -258,11 +258,8 @@ z_beta  <- qnorm(power)
 # 5) Required n per group
 q7_required_n_per_group <- ceiling( 2 * (z_alpha + z_beta)^2 * sp2 / (delta_emp^2) )
 
-# 6) SHOUT IT FROM THE ROOFTOPS
-cat("\n==================== Q7 RESULT ====================\n")
-cat("Required n per group (99% conf, 80% power) for Gene 921: ",
+cat("Required n per group (99% conf, 80% power) for gene with UID 1170 (row 921): ",
     q7_required_n_per_group, "\n")
-cat("===================================================\n\n", sep="")
 
 # 7) Always-visible plain table (no DT)
 res_q7_plain <- data.frame(
@@ -273,7 +270,7 @@ res_q7_plain <- data.frame(
              "Pooled variance (sp^2)",
              "Alpha", "Power",
              "Required n per group"),
-  Value  = c("Gene 921", n1, n2,
+  Value  = c("gene with UID 1170 (row 921)", n1, n2,
              round(m1, 4), round(m2, 4),
              round(delta_emp, 4),
              round(s1, 4), round(s2, 4),
@@ -289,7 +286,7 @@ knitr::kable(res_q7_plain, align = "c")
 
 ### Interpretation (Q7)
 
-For Gene 921, the empirically observed mean difference between germinal center B-like and activated B-like samples was only 0.127 on the log2 scale. With a pooled variance of 0.0697, this small effect size dramatically increases the required sample size compared to the fixed 1.5-fold scenario in Q6. Specifically, **102 samples per group** would be necessary to achieve 80% power at 99% confidence. This contrast highlights a key principle in study design: theoretical fold-change thresholds may suggest modest sample needs, but when the true biological difference is small, substantially larger cohorts are required to detect it with confidence.
+For gene with UID 1170 (row 921), the empirically observed mean difference between germinal center B-like and activated B-like samples was only 0.127 on the log2 scale. With a pooled variance of 0.0697, this small effect size dramatically increases the required sample size compared to the fixed 1.5-fold scenario in Q6. Specifically, **102 samples per group** would be necessary to achieve 80% power at 99% confidence. This contrast highlights a key principle in study design: theoretical fold-change thresholds may suggest modest sample needs, but when the true biological difference is small, substantially larger cohorts are required to detect it with confidence.
 
 
 ## Q8) Now load the ssize and gdata libraries, calculate the standard deviation for each gene in the matrix (Hint: use the na.rm=T argument), and plot a histogram of the standard deviations.  Label the plot accordingly.
