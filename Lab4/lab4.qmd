@@ -14,7 +14,7 @@ format:
 #### Professor Brandon Higgs  
 #### Gene Expression and Data Visualization  
 #### Johns Hopkins University  
-#### September 23rd, 2025
+#### September 25th, 2025
 
 ## Lab 4:
 In this lab, we will be working with a few data sets, each run on a different platform.  The first data set is an R object generated from a 2-channel cDNA array that is called swirl.  This data set is an experiment that was run on a zebrafish to study the early development.  The data is named such because “swirl is a point mutant in the BMP2 gene that affects the dorsal/ventral body axis.”  The objective of the experiment was to evaluate the transcript differences between wildtype zebrafish and those with this mutation.  As I mentioned above, swirl is an R object, so the format and structure of this binary file has to be accessed through various R functions.  If you type “swirl”, you will immediately see that there are attributes that make up this file (e.g. @maInfo) beyond the typical channel information.  Included is metadata information that makes up the experimental parameters, in addition to the raw intensity data.
@@ -24,51 +24,270 @@ The second 2 data sets are raw intensity files – one from an Agilent platform 
 Since both R objects and raw data files are typically what an analyst is given when asked to analyze an experiment, this lab will give you experience processing raw intensity files and normalizing them appropriately.  This is typically the first step in conducting any microarray analysis, so it is important to make sure that the data is normalized appropriately before beginning any subsequent steps.
 
 Data usage: 
-Agilent (txt file) - GenePix_files.zip
 
-Affy (binary files)- HGU133plus_files.zip 
+* Agilent (txt file) - GenePix_files.zip 
 
-## Q1)
+* Affy (binary files)- HGU133plus_files.zip 
+
+## Q1) Load the Libraries
 Load the marray library and the swirl data set.  This data set is an R metadata object, so there are multiple pieces of information (e.g., red/green background and foreground intensities, chip layout design, etc.) that are stored in this R data object.
 
-## Q2)
-Plot an MvA plot of array 3 without any stratified lines.
- 
-## Q3)
+```{r, warning=FALSE, message=FALSE, results='hide'}
+library(marray)
+data(swirl)
+library(ggplot2)
+library(limma)
+library(affydata)
+library(affyPLM)
+library(fpc)
+library(DT)
+```
+
+
+## Q2) Plot an MvA plot of array 3 without any stratified lines.
+```{r}
+# Extract array 3
+arr3 <- swirl[, 3]
+A <- maA(arr3); M <- maM(arr3)
+
+plot(A, M,
+     pch=16, cex=0.38,
+     xlab="A = 0.5 · log2(R·G)", ylab="M = log2(R/G)",
+     main="Swirl — Array 3 (Raw MvA, no lines)")
+abline(h=0, col="grey70", lty=2)
+```
+
+The raw MvA plot for swirl array 3 shows systematic dye bias.  
+Points are not centered at \(M = 0\) across the intensity range, and the spread increases with higher \(A\).  
+As discussed in Lecture 5a, these patterns reflect labeling and scanner artifacts, highlighting the need for normalization to remove intensity-dependent bias while preserving the true biological signal.
+
+## Q3/Q4) Global median localization normalization & plotting
 Normalize array 3 by global median location normalization.
 
-## Q4)
+```{r}
+# Coerce to plain numeric vectors for ggplot
+A <- as.vector(maA(arr3))
+M <- as.vector(maM(arr3))
+
+# Global median location normalization
+med_raw  <- median(M, na.rm = TRUE)
+M_glob   <- M - med_raw
+med_glob <- median(M_glob, na.rm = TRUE)
+
+# Tidy data
+df <- rbind(
+  data.frame(A = A, M = M,        state = "Q2: Raw"),
+  data.frame(A = A, M = M_glob,   state = "Q3: Global median")
+)
+df$state <- factor(df$state, levels = c("Q2: Raw", "Q3: Global median"))
+
+# Lock axes across facets
+xlim_ <- range(df$A, na.rm = TRUE)
+ylim_ <- range(df$M, na.rm = TRUE)
+
+ggplot(df, aes(x = A, y = M)) +
+  geom_point(size = 0.4, alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  facet_wrap(~ state, nrow = 2, scales = "fixed") +  # vertical stack
+  coord_cartesian(xlim = xlim_, ylim = ylim_) +
+  labs(x = "A = 0.5 · log2(R·G)", y = "M = log2(R/G)") +
+  theme_bw(base_size = 12) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linewidth = 0.2, color = "grey92")
+  )
+
+# Numeric check (like your base code)
+cat("Median M (raw):   ", round(med_raw,  4), "\n")
+cat("Median M (after): ", round(med_glob, 4), "\n")
+```
+
+## Q5) What is different between the normalized data and the non-normalized data?
+
+In the raw MvA plot the cloud of points is shifted below \(M = 0\), reflecting an overall dye imbalance between the red and green channels.  
+Global median normalization simply recenters the distribution so that the median of \(M\) is zero.  
+
+As discussed in lecture, this adjustment corrects the global location bias but does not change the underlying curvature with intensity.  
+In other words, the main difference is that the normalized data are balanced around zero, while the overall shape of the plot remains the same as the raw data.
+
+
+## Q6) Lowess global intensity normalization and plotting. 
 Plot an MvA plot of the normalized array without the stratified lines or legend.
+```{r}
+# Lowess fit, detrend, recenter
+lo <- lowess(A, M, f = 2/3)
+M_lowess <- M - lo$y
+M_lowess <- M_lowess - median(M_lowess, na.rm = TRUE)
 
-## Q5)
-What is different between the normalized data and the non-normalized data?
+# Data frame for ggplot
+df <- rbind(
+  data.frame(A = A, M = M,        state = "Q2: Raw"),
+  data.frame(A = A, M = M_lowess,  state = "Q6: Global lowess")
+)
+df$state <- factor(df$state, levels = c("Q2: Raw", "Q6: Global lowess"))
 
-## Q6) 
-Repeat #3 and #4 applying loess global intensity normalization.
+# Consistent axes
+xlim_ <- range(df$A, na.rm=TRUE)
+ylim_ <- range(df$M, na.rm=TRUE)
 
-## Q7)
-Which of the two normalizations appears to be better for this array?
+ggplot(df, aes(x = A, y = M)) +
+  geom_point(size=0.4, alpha=0.7) +
+  geom_hline(yintercept=0, linetype="dashed", color="grey50") +
+  facet_wrap(~state, ncol=1, scales="fixed") +   # stacked vertically
+  coord_cartesian(xlim = xlim_, ylim = ylim_) +
+  labs(x = "A = 0.5 · log2(R·G)", y = "M") +
+  theme_bw(base_size=12) +
+  theme(
+    strip.text = element_text(face="bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linewidth=0.2, color="grey92")
+  )
 
-**(asking for interpretation for this question)**
+# Median checks
+cat("Median M (raw):   ", round(median(M, na.rm=TRUE), 4), "\n")
+cat("Median M (lowess): ", round(median(M_lowess, na.rm=TRUE), 4), "\n")
+```
 
-## Q8)
+
+## Q7) Which of the two normalizations appears to be better for this array?
+Between global median location normalization (Q3) and global lowess normalization (Q6),  
+the **lowess normalization is clearly better** for this array.  
+
+- **Global median** only shifts the distribution so the overall dye balance is corrected,  
+  but the intensity-dependent curvature remains in the MvA plot.  
+- **Global lowess** removes that curvature by adjusting \(M\) as a function of \(A\),  
+  so the point cloud is symmetrically centered around \(M=0\) across the full intensity range.  
+
+As emphasized in lecture, lowess normalization is preferred because it corrects both the global dye bias and the local, intensity-dependent effects, giving a truer picture of biological variation.
+
+## Q8) loading GenePix files
 Now we would like to read in raw GenePix files for 2 cDNA arrays that represent 2 patient samples.  Go to the course website and retrieve the compressed file called ‘GenePix files’.  Open it up and put the contents in a directory.  Now using the sample code below, read in the 2 array files.
 
 > dir.path <- "C:\\Documents and Settings\\higgsb\\Desktop\\"
 > a.cdna <- read.GenePix(path=dir.path,name.Gf = "F532 Median",name.Gb ="B532 Median", name.Rf = "F635 Median", name.Rb = "B635 Median",name.W ="Flags")
 
+```{r}
+# 2. Read in both arrays
+# The function will automatically grab all .gpr files in dir.path
+
+dir.path <- "C:/Users/drena/OneDrive/Desktop/CodingRepos/GeneExpression/Lab4/GenePix_files"
+# Read both arrays into an a.cdna object
+a.cdna <- read.GenePix(
+  path    = dir.path,
+  # if your converted files end in "_utf8.gpr", use that pattern
+  files   = list.files(dir.path, pattern = "_utf8\\.gpr$", full.names = FALSE),
+  name.Gf = "F532 Median",
+  name.Gb = "B532 Median",
+  name.Rf = "F635 Median",
+  name.Rb = "B635 Median",
+  name.W  = "Flags"
+)
+
+# Quick check
+a.cdna
+slotNames(a.cdna)
+
+```
 
 
-## Q9)
-Using the a.cdna object, which is analogous to the swirl metadata object, normalize both arrays and provide MvA plots for each array normalized by the following 3 methods: no normalization, print-tip loess normalization, and scale print-tip normalization using the MAD. Hint: use the par(mfrow=c(3,1)) function to put the 3 plots for a single patient array on the same page.
+## Q9) ploting the normalization
+Using the a.cdna object, which is analogous to the swirl metadata object, normalize both arrays and provide MvA plots for each array normalized by the following 3 methods: no normalization, print-tip lowess normalization, and scale print-tip normalization using the MAD. Hint: use the par(mfrow=c(3,1)) function to put the 3 plots for a single patient array on the same page.
 
-## Q10)
+```{r}
+# Helper to compute raw A/M from a.cdna for one array (j)
+compute_AM_raw <- function(a, j) {
+  Rf <- as.matrix(a@maRf)[, j]
+  Gf <- as.matrix(a@maGf)[, j]
+  Rf[Rf <= 0] <- NA; Gf[Gf <= 0] <- NA
+  A <- 0.5 * (log2(Rf) + log2(Gf))
+  M <- log2(Rf) - log2(Gf)
+  list(A = A, M = M)
+}
+
+# Build tidy df for one array (patient) with 3 methods
+df_for_array <- function(a, j, sample_name) {
+  # 1) No normalization
+  raw <- compute_AM_raw(a, j)
+  df_none <- data.frame(A = raw$A, M = raw$M,
+                        method = "No normalization", sample = sample_name)
+
+  # 2) Print-tip LOWESS (within-array)
+  a_pt <- maNorm(a[, j, drop = FALSE], norm = "printTipLoess")
+  # maNorm updates M; A is unchanged for within-array normalization
+  df_pt <- data.frame(A = raw$A, M = as.vector(a_pt@maM),
+                      method = "Print-tip LOWESS", sample = sample_name)
+
+  # 3) Scale print-tip (MAD)
+  a_sc <- maNorm(a[, j, drop = FALSE], norm = "scalePrintTipMAD")
+  df_sc <- data.frame(A = raw$A, M = as.vector(a_sc@maM),
+                      method = "Scale print-tip (MAD)", sample = sample_name)
+
+  rbind(df_none, df_pt, df_sc)
+}
+
+# Build data for both arrays (assumes exactly 2 arrays in a.cdna)
+df_all <- rbind(
+  df_for_array(a.cdna, 1, "Patient 1"),
+  df_for_array(a.cdna, 2, "Patient 2")
+)
+
+# Plot: 3 methods (rows) × 2 patients (columns)
+ggplot(df_all, aes(x = A, y = M)) +
+  geom_point(size = 0.3, alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  facet_grid(method ~ sample, scales = "free") +
+  labs(
+    title = "MvA plots by normalization method",
+    x = "A = 0.5 * log2(R * G)",
+    y = "M = log2(R / G)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(strip.text.y = element_text(angle = 0))
+```
+
+## Q10) normalized dataframe
 Finally, we would like to create a data matrix that can be written out to a file with 19,200 rows and 2 columns (i.e. each patient array).  Using the functions maM(), maGnames(), and maLabels(), figure out how to create the data matrix, get the probe IDs, and assign the probe IDs to the row names.  Do this for the 2 normalized metadata objects that you created in #9 above (don’t worry about the un-normalized data matrix).
 
-**code to generate data matrix** 
+```{r}
+## 1) Normalize BOTH arrays at once (same as Q9 methods)
+a_pt <- maNorm(a.cdna, norm = "printTipLoess")
+a_sc <- maNorm(a.cdna, norm = "scalePrintTipMAD")
 
-## Q11)
-Load the following libraries: affy, limma, affydata, affyPLM, and fpc.
+## 2) Extract M as matrices (spots x arrays)
+M_pt <- as.matrix(maM(a_pt))
+M_sc <- as.matrix(maM(a_sc))
+
+## 3) Get probe IDs and assign as row names
+gnames    <- maGnames(a.cdna)          # gene/spot annotations
+probe_ids <- maLabels(gnames)          # character vector of IDs
+
+stopifnot(length(probe_ids) == nrow(M_pt), ncol(M_pt) == 2)
+
+rownames(M_pt) <- probe_ids
+rownames(M_sc) <- probe_ids
+
+## 4) Give informative column names (2 patient arrays)
+colnames(M_pt) <- c("Patient1", "Patient2")
+colnames(M_sc) <- c("Patient1", "Patient2")
+
+## 6) (Optional) write out
+# write.table(M_pt, file = "MvA_printTipLoess_19200x2.txt",
+#             sep = "\t", quote = FALSE, row.names = TRUE)
+# write.table(M_sc, file = "MvA_scalePrintTipMAD_19200x2.txt",
+#             sep = "\t", quote = FALSE, row.names = TRUE)
+
+## Return objects in your environment for grading:
+## Return only dims and heads for grading
+cat("M_pt dimensions:", paste(dim(M_pt), collapse = " x "), "\n")
+print(head(M_pt))
+
+cat("\nM_sc dimensions:", paste(dim(M_sc), collapse = " x "), "\n")
+print(head(M_sc))
+```
+
+## Q11) Load the following libraries: affy, limma, affydata, affyPLM, and fpc.
+Done in cell at Q1
 
 ## Q12) 
 Now we would like to read in 3 raw Affymetrix .CEL files and normalize them with 2 different algorithms.  These 3 arrays represent 3 normal healthy subjects that should have similar expression profiles. They are on the course website in the compressed file called Affymetrix .CEL files.  Use the following code below to read in a metadata object for the 3 arrays (dir.path should be the same as above).
@@ -76,14 +295,185 @@ Now we would like to read in 3 raw Affymetrix .CEL files and normalize them with
 > fns <- sort(list.celfiles(path=dir.path,full.names=TRUE))
 > data.affy <- ReadAffy(filenames=fns,phenoData=NULL)
 
+```{r}
+dir.path <- "C:/Users/drena/OneDrive/Desktop/CodingRepos/GeneExpression/Lab4/HGU133plus_files"
+# 2) Find the 3 CEL files and read them
+fns <- sort(list.celfiles(path = dir.path, full.names = TRUE))
+stopifnot(length(fns) == 3)
 
-## Q13)
+data.affy <- ReadAffy(filenames = fns, phenoData = NULL)
+
+# (Optional) make sample names short/nice
+sampleNames(data.affy) <- gsub("\\.CEL$","", basename(fns), ignore.case = TRUE)
+
+# 3) Normalize with two algorithms
+
+## RMA (background correction + quantile normalization + median polish; returns log2)
+eset_rma  <- rma(data.affy)                # ExpressionSet (log2)
+mat_rma   <- exprs(eset_rma)               # matrix [probesets x 3]
+
+## MAS5 (returns linear scale by default; convert to log2 for comparability)
+eset_mas5 <- mas5(data.affy)               # ExpressionSet (linear)
+mat_mas5  <- log2(pmax(exprs(eset_mas5), 1))  # log2-transform; guard zeros
+
+# 4) Return compact outputs (dims + heads) for grading/checks
+cat("RMA matrix dims:", paste(dim(mat_rma), collapse=" x"), "\n")
+print(head(mat_rma))
+
+cat("\nMAS5 (log2) matrix dims:", paste(dim(mat_mas5), collapse=" x"), "\n")
+print(head(mat_mas5))
+```
+
+
+## Q13) Data matricies for Affy data
 Using the function: expresso in addition to exprs(), create the normalized data matrices with 54,675 rows and 3 columns for the 2 different normalization algorithms.
 
 Be sure to use normalize.method="quantiles", summary.method="medianpolish", and for RMA: pmcorrect.method="pmonly"
 MAS: pmcorrect.method="mas”
 
+```{r}
+# ---- Q13: expresso normalization with caching ----
+if (!requireNamespace("affy", quietly = TRUE)) {
+  if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+  BiocManager::install("affy")
+}
+library(affy)
+
+# Set your save paths
+rma_file <- "mat_rma_exp.rds"
+mas_file <- "mat_mas_exp.rds"
+
+if (file.exists(rma_file) && file.exists(mas_file)) {
+  cat("Loading cached RDS results...\n")
+  mat_rma_exp <- readRDS(rma_file)
+  mat_mas_exp <- readRDS(mas_file)
+} else {
+  cat("Running expresso normalizations (may take a while)...\n")
+
+  # RMA
+  t_rma <- system.time({
+    eset_rma_exp <- expresso(
+      data.affy,
+      bgcorrect.method = "rma",
+      normalize.method = "quantiles",
+      pmcorrect.method = "pmonly",
+      summary.method   = "medianpolish"
+    )
+  })
+  mat_rma_exp <- exprs(eset_rma_exp); rm(eset_rma_exp); gc()
+  saveRDS(mat_rma_exp, rma_file)
+
+  # MAS
+  t_mas <- system.time({
+    eset_mas_exp <- expresso(
+      data.affy,
+      bgcorrect.method = "mas",
+      normalize.method = "quantiles",
+      pmcorrect.method = "mas",
+      summary.method   = "medianpolish"
+    )
+  })
+  mat_mas_exp <- exprs(eset_mas_exp); rm(eset_mas_exp); gc()
+  saveRDS(mat_mas_exp, mas_file)
+
+  cat("RMA time:", t_rma["elapsed"], "sec\n")
+  cat("MAS time:", t_mas["elapsed"], "sec\n")
+}
+
+# Optional: ensure MAS on log2 scale
+if (max(mat_mas_exp, na.rm = TRUE) > 100) {
+  mat_mas_exp <- log2(pmax(mat_mas_exp, 1))
+}
+
+# Add sample names if available
+if (!is.null(sampleNames(data.affy))) {
+  colnames(mat_rma_exp) <- sampleNames(data.affy)
+  colnames(mat_mas_exp) <- sampleNames(data.affy)
+}
+
+# Return dims + heads only
+cat("RMA (expresso) dims:", paste(dim(mat_rma_exp), collapse = " x "), "\n")
+print(head(mat_rma_exp))
+
+cat("\nMAS (expresso) dims:", paste(dim(mat_mas_exp), collapse = " x "), "\n")
+print(head(mat_mas_exp))
+```
 
 
-## Q14)
+## Q14) Normalization method comparison
 Now use the cor() function to calculate the correlation between the 3 arrays for both normalized data matrices.  Since these 3 subjects are all healthy normal individuals, we would expect to see somewhat good correlation structure between them all when looking across all genes on the array.  Which normalization method has a higher overall correlation structure for these 3 normal healthy subjects?  Show how you arrived at this answer.
+
+```{r}
+# Align rows (safety)
+common_ids <- intersect(rownames(mat_rma_exp), rownames(mat_mas_exp))
+mat_rma <- mat_rma_exp[common_ids, , drop = FALSE]
+mat_mas <- mat_mas_exp[common_ids, , drop = FALSE]
+
+# Correlation matrices (Pearson)
+cor_rma <- cor(mat_rma, use = "pairwise.complete.obs", method = "pearson")
+cor_mas <- cor(mat_mas, use = "pairwise.complete.obs", method = "pearson")
+
+# Average off-diagonal correlation
+offdiag_mean <- function(M) mean(M[upper.tri(M)], na.rm = TRUE)
+mean_rma <- offdiag_mean(cor_rma)
+mean_mas <- offdiag_mean(cor_mas)
+
+# Helper: pretty DT for a correlation matrix
+cor_dt <- function(M, title = "Correlation matrix") {
+  Mround <- round(M, 3)
+  df <- data.frame(Sample = rownames(Mround), Mround, check.names = FALSE)
+
+  # Build cuts from the observed range and make values = cuts + 1
+  rng   <- range(as.matrix(Mround), na.rm = TRUE)
+  cuts  <- seq(rng[1], rng[2], length.out = 7)[-c(1, 7)]   # 5 cuts
+  vals  <- colorRampPalette(c("#f7fbff", "#6baed6", "#08306b"))(length(cuts) + 1)  # 6 colors
+
+  dt <- datatable(
+    df,
+    rownames = FALSE,
+    caption = htmltools::tags$caption(style = "caption-side: top; text-align: left;", title),
+    options = list(dom = "t", scrollX = TRUE)
+  )
+
+  # Apply gradient to numeric columns only
+  num_cols <- colnames(df)[sapply(df, is.numeric)]
+  for (cn in num_cols) {
+    dt <- formatStyle(dt, cn, backgroundColor = styleInterval(cuts, vals))
+  }
+  dt
+}
+
+# Build DT tables
+dt_rma <- cor_dt(cor_rma, title = "RMA (expresso): 3×3 Pearson correlations")
+dt_mas <- cor_dt(cor_mas, title = "MAS (expresso): 3×3 Pearson correlations")
+
+# Summary DT (which normalization has higher overall correlation?)
+winner <- if (is.finite(mean_rma) && is.finite(mean_mas)) {
+  if (mean_rma > mean_mas) "RMA" else if (mean_mas > mean_rma) "MAS" else "Tie"
+} else NA_character_
+
+summary_df <- data.frame(
+  Method = c("RMA (expresso)", "MAS (expresso)"),
+  Mean_OffDiag_r = round(c(mean_rma, mean_mas), 4),
+  stringsAsFactors = FALSE
+)
+
+dt_summary <- datatable(
+  summary_df,
+  rownames = FALSE,
+  caption = htmltools::tags$caption(
+    style = "caption-side: top; text-align: left;",
+    paste0("Overall correlation summary (winner: ", winner, ")")
+  ),
+  options = list(dom = "t")
+)
+
+# Display (in Quarto/knitr these will render one after another)
+dt_summary
+dt_rma
+dt_mas
+```
+
+## Q14 Interpretation/Explanation
+
+After normalizing the three Affymetrix arrays with both RMA and MAS, I calculated pairwise Pearson correlations across all 54,675 genes. Because all three subjects are healthy, the expectation from lecture is that their expression profiles should be broadly similar, yielding strong correlations regardless of normalization. However, the method of normalization can influence how well this similarity is preserved. With RMA (background correction by RMA, quantile normalization, PM-only correction, and median polish summarization), the average off-diagonal correlation was 0.9813, compared to 0.9150 for MAS (MAS background correction and PM correction with the same normalization/summarization). The higher correlation values under RMA indicate that its quantile normalization and robust summarization produce more consistent expression measures across arrays, which is exactly the advantage we discussed in lecture. Thus, RMA provides the stronger overall correlation structure for these three normal healthy subjects, making it the preferable method in this context.
