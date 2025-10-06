@@ -1,0 +1,46 @@
+---
+title: "Lab7 Gene Expression"
+Author: "Dylan Renard"
+output: pdf_document
+format:
+  html:
+    toc: true
+    code-fold: show
+    self-contained: true
+  pdf: default
+---
+
+#### Dylan Renard  
+#### Professor Brandon Higgs  
+#### Gene Expression and Data Visualization  
+#### Johns Hopkins University  
+#### October 6th, 2025
+
+## Lab 7
+In this lab, we will be using an Affymetrix breast cancer data set that was run on the human HGU133A array.  In the study, the investigators were interested in identifying transcripts that were differentially expressed in different histologic grade tumor samples to evaluate whether gene expression profiling could be used to improve histologic grading.  Our interest in this data set does not focus on this same biological question.  Rather, we would like to assess the processing variability in the data, since this type of variability can many times confound the biological variability.
+
+Since the array data was generated at different sites, we are interested in how this factor affects the variability in the samples.  Specifically, we would like to use dimensionality reduction (DR) methods to evaluate the amount of variance that is explained by differences in processing sites.  You will compute 4 different DR methods on this data set with the objectives of 1) summarizing the amount of variability is explained by differences in processing sites, and 2) understanding the visual differences in how the data structure is embedded when using difference methods of DR.
+
+The paper is entitled “Gene Expression Profi ling in Breast Cancer: Understanding the Molecular Basis of Histologic Grade To Improve Prognosis” and is available on the course website.
+
+
+## Q1) Load the Sotiriou breast cancer data set from the class website as well as the annotation file.
+
+## Q2) Calculate and plot a PCA plot.  Label the points based on the site (“site” column header in annotation file).  Make sure to add a legend to denote the colors of the two sites.
+
+## Q3) Calculate and plot the scree plot that corresponds to the PCA from question #2.  Using only the first two eigenvalues, approximately how much variability in the data is explained?
+
+## Q4) Now calculate and plot 2 different MDS plots: 
+1) classic MDS
+2) nonmetric MDS. 
+
+Label the points based on the site.  Make sure to load the MASS library for the nonmetric MDS plot function.  Also add a legend to both plots.
+
+## Q5) Now, first center and scale the rows of the matrix with the commands below (assuming that dd is your data matrix):
+> temp <- t(dd)
+> temp <- scale(temp,center=T,scale=T) 
+
+Then calculate and plot a two-dimensional embedding of the weighted graph Laplacian using t(temp) as the ‘X’ argument and ‘NULL’ for the qnt argument (don’t use quotations to run the function).  Label the points based on the site.  Also add a legend.  
+ 
+Hint: for the colors, use the following command to get a color vector for the samples:
+foo <- as.numeric(ann$site) 
