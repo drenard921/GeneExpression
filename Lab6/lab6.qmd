@@ -1,0 +1,65 @@
+---
+title: "Lab6 Gene Expression"
+Author: "Dylan Renard"
+output: pdf_document
+format:
+  html:
+    toc: true
+    code-fold: show
+    self-contained: true
+  pdf: default
+---
+
+#### Dylan Renard  
+#### Professor Brandon Higgs  
+#### Gene Expression and Data Visualization  
+#### Johns Hopkins University  
+#### October 6th, 2025
+
+## Lab6 
+In this lab, we will be working with an Affymetrix data set that was run on the human HGU95A array.  This experiment was designed to assess the gene expression events in the frontal cortex due to aging.  A total of 18 male and 12 female postmortem brain samples were obtained to assess this.
+
+The analysis that we are interested in conducting is a direct follow up to the previous lab of differential expression.  We first want to identify those genes/probes that are differentially expressed in the frontal cortex between old and young subjects, then between males and females.  Next, we would like to evaluate the differences between a couple of multiple testing adjustment methods.  As explained in the lecture and the course website, multiple testing is a necessary step to reduce false positives when conducting more than a single statistical test.  You will generate some p-value plots to get an idea of the how conservative some methods are compared to others.
+
+I have identified 2 gene vectors for you to use below, so do not calculate the t-test or adjustments on the entire array of genes/probes.
+
+For the second part of this lab, you will be working with RNA-sequencing data from The Cancer Genome Atlas (TCGA), specifically a breast invasive carcinoma dataset of 119 patient tumors. The data matrix and annotation files are on the course website. We will be trying to confirm an observation from a meta-analysis performed by Mehra et al, 2005 in Cancer Research. The authors identified the gene (using arrays) and protein (using immunohistochemistry) GATA3 as a prognostic factor in breast cancer, where patients with low expression of GATA3 experienced overall worse survival. The PubMed abstract is here: http://www.ncbi.nlm.nih.gov/pubmed/16357129.
+
+
+## Q1) Download the GEO Brain Aging study from the class website.  Also obtain the annotation file for this data frame.
+
+## Q2) Load into R, using read.table() function and the header=T/row.names=1 arguments for each data file.
+
+## Q3) Prepare 2 separate vectors for comparison.  The first is a comparison between male and female patients.  The current data frame can be left alone for this, since the males and females are all grouped together.  The second vector is comparison between patients >= 50 years of age and those < 50 years of age. To do this, you must use the annotation file and logical operators to isolate the correct arrays/samples.
+
+## Q4) Run the t.test function from the notes using the first gene vector below for the gender comparison.  Then use the second gene vector below for the age comparison.  Using these p-values, use either p.adjust in the base library or mt.rawp2adjp in the multtest library to adjust the values for multiple corrections with the Holm's method.
+
+## Q5) Sort the adjusted p-values and non-adjusted p-values and plot them vs. the x-axis of numbers for each comparison data set.  Make sure that the two lines are different colors.  Also make sure that the p-values are sorted before plotting.
+
+## Q6) Repeat #4 and #5 with the Bonferroni method.
+
+## Q7) Read in the log2 normalized fragments per kb per million mapped reads (FPKM) data matrix and annotation files. This is RNA-sequencing data that has normalized read counts on a similar scale to microarray intensities.
+
+## Q8) Use grep to subset the data matrix only by gene ‘GATA3’ and make sure to cast this vector to numeric.
+
+## Q9) Create a binary (1/0) vector for the patients where the upper 25% expression of GATA3 is coded as 1 and all other patients are coded as 0. Call this new variable ‘group’.
+
+## Q10) Create a data matrix with the ‘group’ variable you created in #9 and the remaining variables in the annotation file. 
+
+## Q11) Run a Kaplan-Meier (KM) analysis to determine if a difference in survival experience exists between the two GATA3 expression groups using the survdiff function. Extract the p-value from the chi squared test output.
+
+## Q12) Now run a Cox proportion hazard (PH) regression model on just the grouping variable (i.e. no other covariates) and extract both the p-value and hazard ratio from the output.
+
+## Q13) Run the survfit() function only on the grouping variable (i.e. no other covariates) and plot the KM curves, being sure to label the two groups with a legend, two different colors for each line, and provide the KM p-value, Cox PH p-value, Cox PH hazard ratio, and sample sizes all in each of the two groups all on the plot.
+
+## Q14) Does this result agree with the Mehra et al, study result?
+
+## Gene Vectors (indices for specific rows/genes)
+#### gender comparison gene vector
+g.g <- c(1394,  1474,  1917,  2099,  2367,  2428, 2625,  3168,  3181,  3641,  3832,  4526,
+4731,  4863,  6062,  6356,  6684,  6787,  6900,  7223,  7244,  7299,  8086,  8652,
+8959,  9073,  9145,  9389, 10219, 11238, 11669, 11674, 11793)
+
+#### age comparison gene vector
+g.a <- c(25, 302,  1847,  2324,  246,  2757, 3222, 3675,  4429,  4430,  4912,  5640, 5835, 5856,  6803,  7229,  7833,  8133, 8579,  8822,  8994, 10101, 11433, 12039, 12353,
+12404, 12442, 67, 88, 100)
