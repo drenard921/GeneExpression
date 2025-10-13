@@ -27,6 +27,18 @@ We will be working with 4 lean subjects from which a needle biopsy was taken.
 
 ## Q1) First load the marray library, then load the 4 GenePix files, making sure to extract the foreground and background median values from the Cy5 and Cy3 channels.  (2.5 pts)
 
+```{r}
+# --- Load required packages ---
+
+suppressPackageStartupMessages({
+  library(marray)   # two-channel microarray data structures
+  library(limma)    # auxiliary plotting / normalization functions
+})
+
+
+
+```
+
 ## Q2) Normalize each array using median global, loess, and print-tip-group loess methods. Then plot MvA plots of all 4 arrays comparing no normalization to the other 3 normalization approaches. (2 pts)
 
 ## Q3) Plot density plots of the log ratio values for each normalization (and pre normalization) for only array #4.  Put them all on the same plot.  Make sure to label the axes and provide a legend. (2 pts)
