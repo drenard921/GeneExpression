@@ -35,7 +35,51 @@ suppressPackageStartupMessages({
   library(limma)    # auxiliary plotting / normalization functions
 })
 
+# relative folder with your cleaned, uncompressed .gpr files
+dir_clean <- "GSE12050_amend.gpix/cleaned_seqs"
 
+# OPTION A: direct file vector (explicit, least magical)
+files_gpr <- file.path(dir_clean, c(
+  "GSM304445_utf8.gpr",
+  "GSM304446_utf8.gpr",
+  "GSM304447_utf8.gpr",
+  "GSM304448_utf8.gpr"
+))
+stopifnot(all(file.exists(files_gpr)))
+
+# (If HW1 used a targets table, you could also do:
+# targets <- data.frame(FileName = basename(files_gpr), row.names = c("A1","A2","A3","A4"))
+# and pass targets=targets, but explicit file vector is fine.)
+
+# 1) Read GenePix (HW1 style): pull MEDIAN columns explicitly
+RG <- read.maimages(
+  files   = files_gpr,
+  source  = "genepix",
+  columns = list(Rf = "F635 Median",  # Cy5 foreground (635)
+                 Gf = "F532 Median",  # Cy3 foreground (532)
+                 Rb = "B635 Median",  # Cy5 background
+                 Gb = "B532 Median")  # Cy3 background
+)
+
+# 2) Wrap to marrayRaw so the rest of your HW2 code stays marray-like
+arrays <- methods::new(
+  "marrayRaw",
+  maRf = RG$R,   # Cy5 (635) foreground
+  maRb = RG$Rb,  # Cy5 background
+  maGf = RG$G,   # Cy3 (532) foreground
+  maGb = RG$Gb   # Cy3 background
+)
+methods::slot(arrays, "maLayout") <- methods::new(
+  "marrayLayout",
+  maNgr = 1L, maNgc = 1L,
+  maNsr = nrow(RG$R), maNsc = 1L
+)
+
+# 3) Minimal Q1 evidence
+arrays
+summary(arrays)
+dim(maRf(arrays)); dim(maGf(arrays))   # <spots> x 4
+colnames(maRf(arrays))
 
 ```
 
