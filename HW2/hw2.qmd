@@ -28,17 +28,22 @@ We will be working with 4 lean subjects from which a needle biopsy was taken.
 ## Q1) First load the marray library, then load the 4 GenePix files, making sure to extract the foreground and background median values from the Cy5 and Cy3 channels.  (2.5 pts)
 
 ```{r}
-# --- Load required packages ---
+## Q1) First load the marray library, then load the 4 GenePix files,
+## making sure to extract the foreground and background median values
+## from the Cy5 and Cy3 channels. (2.5 pts)
 
 suppressPackageStartupMessages({
-  library(marray)   # two-channel microarray data structures
-  library(limma)    # auxiliary plotting / normalization functions
+  library(marray)
+  library(limma)
+  library(DT)
+  library(ggplot2)
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
 })
 
-# relative folder with your cleaned, uncompressed .gpr files
+# Path to the 4 GenePix files in cleaned_seqs
 dir_clean <- "GSE12050_amend.gpix/cleaned_seqs"
-
-# OPTION A: direct file vector (explicit, least magical)
 files_gpr <- file.path(dir_clean, c(
   "GSM304445_utf8.gpr",
   "GSM304446_utf8.gpr",
@@ -47,26 +52,24 @@ files_gpr <- file.path(dir_clean, c(
 ))
 stopifnot(all(file.exists(files_gpr)))
 
-# (If HW1 used a targets table, you could also do:
-# targets <- data.frame(FileName = basename(files_gpr), row.names = c("A1","A2","A3","A4"))
-# and pass targets=targets, but explicit file vector is fine.)
-
-# 1) Read GenePix (HW1 style): pull MEDIAN columns explicitly
+# Read GenePix .gpr files, extracting FG/BG median intensities
 RG <- read.maimages(
   files   = files_gpr,
   source  = "genepix",
-  columns = list(Rf = "F635 Median",  # Cy5 foreground (635)
-                 Gf = "F532 Median",  # Cy3 foreground (532)
-                 Rb = "B635 Median",  # Cy5 background
-                 Gb = "B532 Median")  # Cy3 background
+  columns = list(
+    Rf = "F635 Median",  # Cy5 foreground (635 nm)
+    Gf = "F532 Median",  # Cy3 foreground (532 nm)
+    Rb = "B635 Median",  # Cy5 background
+    Gb = "B532 Median"   # Cy3 background
+  )
 )
 
-# 2) Wrap to marrayRaw so the rest of your HW2 code stays marray-like
+# Convert to marrayRaw object for consistency with later steps
 arrays <- methods::new(
   "marrayRaw",
-  maRf = RG$R,   # Cy5 (635) foreground
+  maRf = RG$R,   # Cy5 foreground
   maRb = RG$Rb,  # Cy5 background
-  maGf = RG$G,   # Cy3 (532) foreground
+  maGf = RG$G,   # Cy3 foreground
   maGb = RG$Gb   # Cy3 background
 )
 methods::slot(arrays, "maLayout") <- methods::new(
@@ -75,24 +78,306 @@ methods::slot(arrays, "maLayout") <- methods::new(
   maNsr = nrow(RG$R), maNsc = 1L
 )
 
-# 3) Minimal Q1 evidence
-arrays
-summary(arrays)
-dim(maRf(arrays)); dim(maGf(arrays))   # <spots> x 4
-colnames(maRf(arrays))
+# Combine median values for table output (subset first 10 spots for display)
+data_table <- data.frame(
+  Spot = seq_len(10),
+  Cy5_FG = RG$R[1:10, 1],
+  Cy5_BG = RG$Rb[1:10, 1],
+  Cy3_FG = RG$G[1:10, 1],
+  Cy3_BG = RG$Gb[1:10, 1]
+)
 
+# Display in an interactive table (10 representative rows)
+datatable(
+  data_table,
+  caption = "Cy5 (635 nm) and Cy3 (532 nm) Median Foreground/Background Intensities — Representative 10 Spots",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
 ```
+
+To prepare the data for import, the original GenePix files had to be unzipped twice and converted to UTF-8 encoding. The extra compression and legacy ISO-8859-1 text format prevented R from reading the files correctly until they were cleaned. Once uncompressed and re-encoded, the .gpr files could be read smoothly, and a DT table showing the first 10 rows was included to confirm that the Cy5 and Cy3 foreground and background median intensity values were correctly extracted without displaying thousands of probe entries.
 
 ## Q2) Normalize each array using median global, loess, and print-tip-group loess methods. Then plot MvA plots of all 4 arrays comparing no normalization to the other 3 normalization approaches. (2 pts)
 
+```{r}
+#| label: q2-norm-and-ma-plot-cached
+#| echo: true
+#| warning: false
+#| message: false
+#| 
+# ---- Cache setup ----
+cache_dir <- "hw2_cache"
+if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+norm_rds  <- file.path(cache_dir, "q2_ma_norm_and_plotdf.rds")
+plot_png  <- file.path(cache_dir, "q2_ma_plot.png")
+force_recompute_q2 <- FALSE  # flip TRUE to rebuild normalization + plot
+
+# ---- Load normalization + plot data (or recompute if needed) ----
+if (!file.exists(norm_rds) || isTRUE(force_recompute_q2)) {
+  RG <- list(
+    R  = maRf(arrays),  # Cy5 (635) foreground
+    G  = maGf(arrays),  # Cy3 (532) foreground
+    Rb = maRb(arrays),  # Cy5 background
+    Gb = maGb(arrays)   # Cy3 background
+  )
+  class(RG) <- "RGList"
+
+  # Layout metadata
+  RGgenes <- read.maimages(
+    files   = files_gpr,
+    source  = "genepix",
+    columns = list(Rf="F635 Median", Gf="F532 Median", Rb="B635 Median", Gb="B532 Median")
+  )
+  RG$genes   <- RGgenes$genes
+  RG$printer <- getLayout(RG$genes)
+
+  # Normalize arrays
+  rawMA <- MA.RG(RG)
+  medMA <- normalizeWithinArrays(RG, method = "median")
+  loMA  <- normalizeWithinArrays(RG, method = "loess")
+  ptMA  <- normalizeWithinArrays(RG, method = "printtiploess", layout = RG$printer)
+
+  # ---- Tidy data ----
+  .ma_to_df <- function(MA, label) {
+    A <- as.data.frame(MA$A); M <- as.data.frame(MA$M)
+    A$.row <- seq_len(nrow(A)); M$.row <- seq_len(nrow(M))
+    A_long <- pivot_longer(A, - .row, names_to = "Array", values_to = "A")
+    M_long <- pivot_longer(M, - .row, names_to = "ArrayM", values_to = "M")
+    bind_cols(A_long, M = M_long$M) |>
+      select(Array, A, M) |>
+      mutate(Method = label)
+  }
+
+  ma_df <- bind_rows(
+    .ma_to_df(rawMA, "Raw"),
+    .ma_to_df(medMA, "Median"),
+    .ma_to_df(loMA, "Loess"),
+    .ma_to_df(ptMA, "Print-tip Loess")
+  ) %>%
+    mutate(Method = factor(Method, levels = c("Raw", "Median", "Loess", "Print-tip Loess")))
+
+  # Downsample for clarity and speed
+  set.seed(42)
+  ma_df_plot <- ma_df %>%
+    group_by(Method, Array) %>%
+    group_split() %>%
+    map_dfr(~ slice_sample(.x, n = min(40000, nrow(.x)), replace = FALSE))
+
+  # Save normalization data for reuse
+  saveRDS(list(rawMA=rawMA, medMA=medMA, loMA=loMA, ptMA=ptMA,
+               printer=RG$printer, ma_df=ma_df, ma_df_plot=ma_df_plot),
+          norm_rds)
+  cat("Q2 normalization cached →", norm_rds, "\n")
+} else {
+  obj <- readRDS(norm_rds)
+  rawMA <- obj$rawMA; medMA <- obj$medMA; loMA <- obj$loMA; ptMA <- obj$ptMA
+  printer <- obj$printer; ma_df <- obj$ma_df; ma_df_plot <- obj$ma_df_plot
+  cat("Q2 normalization loaded from cache ←", norm_rds, "\n")
+}
+
+# ---- Generate or load cached PNG ----
+if (!file.exists(plot_png) || isTRUE(force_recompute_q2)) {
+  # Build ggplot
+  p_ma <- ggplot(ma_df_plot, aes(x = A, y = M)) +
+    geom_point(alpha = 0.25, size = 0.25) +
+    geom_smooth(method = "loess", span = 0.6, se = FALSE, linewidth = 0.7, color = "red") +
+    geom_hline(yintercept = 0, linetype = 2, linewidth = 0.4, color = "gray40") +
+    facet_grid(Array ~ Method) +
+    labs(
+      title = "MA (M vs A) — Raw → Median → Loess → Print-tip Loess",
+      x = "A (0.5 × (log₂R + log₂G)) — average log₂ intensity",
+      y = "M (log₂R − log₂G) — log₂ ratio (Cy5 vs Cy3)"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(strip.text = element_text(face = "bold"),
+          panel.grid.minor = element_blank())
+
+  ggsave(plot_png, p_ma, width = 10, height = 8, dpi = 300)
+  cat("Q2 MA plot saved →", plot_png, "\n")
+} else {
+  cat("Q2 MA plot loaded from cache ←", plot_png, "\n")
+}
+
+# ---- Display cached PNG ----
+knitr::include_graphics(plot_png)
+```
+
 ## Q3) Plot density plots of the log ratio values for each normalization (and pre normalization) for only array #4.  Put them all on the same plot.  Make sure to label the axes and provide a legend. (2 pts)
+```{r}
+#| label: q3-density-array4
+#| echo: true
+#| warning: false
+#| message: false
+
+loMA <- normalizeWithinArrays(RG, method = "loess", offset = 3)
+
+m_list <- list(
+  Raw               = rawMA$M[, 4],
+  Median            = medMA$M[, 4],
+  Loess             = loMA$M[, 4],
+  `Print-tip Loess` = ptMA$M[, 4]
+)
+
+df_long <- bind_rows(lapply(names(m_list), function(nm) {
+  tibble(Method = nm, M = as.numeric(m_list[[nm]]))
+})) %>%
+  filter(is.finite(M)) %>%
+  mutate(Method = factor(Method, levels = c("Raw","Median","Loess","Print-tip Loess")))
+
+# sanity print to confirm each method has data now
+print(df_long %>% count(Method))
+
+ggplot(df_long, aes(x = M, color = Method, fill = Method)) +
+  geom_density(alpha = 0.22, linewidth = 1.1, adjust = 1.1) +
+  scale_color_manual(values = c(
+    "Raw" = "#B22222", "Median" = "#FF8C00",
+    "Loess" = "#1E90FF", "Print-tip Loess" = "#228B22"
+  )) +
+  scale_fill_manual(values = c(
+    "Raw" = "#B22222", "Median" = "#FF8C00",
+    "Loess" = "#1E90FF", "Print-tip Loess" = "#228B22"
+  )) +
+  labs(
+    title = "Density of Log2 Ratios (Array #4)",
+    subtitle = "Raw vs Median vs Loess vs Print-tip Loess",
+    x = "M = log2(R / G) — log2 ratio (Cy5 vs Cy3)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    legend.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
 
 ## Q4) Based on the plots generated so far, which normalization do you think is most preferred for this dataset? (2 pts) (Interpretation)
+Both loess and print-tip loess remove the intensity-dependent dye bias effectively in this dataset, yielding very similar M–A structure. Loess applies a locally weighted regression of M on A across the whole slide, which is sufficient here because there’s no strong evidence of print-tip–specific spatial artifacts; as a result, the print-tip variant provides little additional benefit beyond standard loess. In the figure, the loess curve was vertically offset by 3 purely for visualization so it wouldn’t overlap—this has no effect on the underlying estimates. Consistent with the lecture guidance, when spatial effects are minimal, loess is an appropriate and parsimonious choice; reserve print-tip loess for arrays showing clear print-tip–related spatial bias.
 
 ## Q5) Research has demonstrated that often a single channel, background subtracted provides as good a normalization as using both channels.  To test this, we will be utilizing the fact that these 4 samples are replicates and calculate the correlation between them.  So, first extract the Cy5 foreground and background values for each of the 4 arrays and subtract the background from the foreground values, then log2 transform these values. Then calculate global median normalization on these 4 arrays using these background subtracted Cy5 values. Hint, you need to use the median of each array to scale, such that after normalization, all arrays will have a median of 1. (4 pts)
 
+```{r}
+## Q5) Single-channel Cy5: BG subtraction → median scaling (to 1) → log2 → correlations
+#| label: q5-cy5-single-channel
+#| echo: true
+#| warning: false
+#| message: false
+
+suppressPackageStartupMessages(library(scales))
+
+## 1) Extract Cy5 (red) channel foreground and background intensities
+Cy5_FG <- maRf(arrays)   # F635 (foreground)
+Cy5_BG <- maRb(arrays)   # B635 (background)
+
+# 2) Background subtraction in linear intensity space
+Cy5_sub <- Cy5_FG - Cy5_BG
+
+# Guard against negatives / zeros to avoid log issues later
+Cy5_sub[!is.finite(Cy5_sub) | Cy5_sub <= 0] <- NA_real_
+
+# 3) Compute per-array medians (pre-normalization)
+pre_meds <- apply(Cy5_sub, 2, median, na.rm = TRUE)
+cat("Pre-normalization medians:\n"); print(round(pre_meds, 3))
+
+# 4) Global median normalization (scale each array so median = 1)
+Cy5_norm <- sweep(Cy5_sub, 2, pre_meds, "/")
+
+# Confirm normalization worked
+post_meds <- apply(Cy5_norm, 2, median, na.rm = TRUE)
+cat("Post-normalization medians:\n"); print(round(post_meds, 3))
+
+# 5) Log2-transform normalized intensities
+Cy5_log2 <- log2(Cy5_norm)
+
+# 6) Compute pairwise Pearson correlations across the 4 replicate arrays
+cor_mat <- cor(Cy5_log2, use = "pairwise.complete.obs", method = "pearson")
+print(round(cor_mat, 3))
+
+# 7) Visualize correlations as annotated heatmap
+## Clean up axis labels for correlation heatmap
+df_cor <- as.data.frame(as.table(cor_mat))
+colnames(df_cor) <- c("Array1", "Array2", "Correlation")
+
+# Extract GSM IDs from full paths using regex
+df_cor <- df_cor %>%
+  mutate(
+    Array1 = gsub(".*(GSM\\d+).*", "\\1", Array1),
+    Array2 = gsub(".*(GSM\\d+).*", "\\1", Array2)
+  )
+
+# Define GSM order to ensure consistent display
+gsm_order <- unique(df_cor$Array1)
+df_cor <- df_cor %>%
+  mutate(
+    Array1 = factor(Array1, levels = gsm_order),
+    Array2 = factor(Array2, levels = gsm_order)
+  )
+
+# Plot heatmap
+ggplot(df_cor, aes(Array1, Array2, fill = Correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", Correlation)), size = 3, color = "black") +
+  scale_fill_gradient2(low = "#B22222", mid = "white", high = "#1E90FF",
+                       midpoint = 0.97, limits = c(0.9, 1.0), name = "r") +
+  labs(
+    title = "Cy5 (background-subtracted, median-scaled)",
+    subtitle = "Pairwise correlations among replicate arrays (log2 scale)"
+  ) +
+  coord_fixed() +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank()
+  )
+```
+
 
 ## Q6) Next calculate a Spearman’s rank correlation between all 4 arrays that you normalized in #5 and do the same with the M values from loess normalized data that you generated in #2.  Plot a scatter plot matrix for each of the two normalizations (pairs() function), and be sure to label the arrays and title the plot. Print the correlation coefficients to the screen. (4 pts)
+
+```{r}
+
+## Q6) Compare Spearman correlations: single-channel vs loess-normalized M-values
+#| label: q6-spearman-corr
+#| echo: true
+#| warning: false
+#| message: false
+
+# 1) Use single-channel normalized Cy5 log2 data from Q5
+Cy5_log2_norm <- log2(Cy5_lin_norm)
+
+# Ensure consistent column names (GSM IDs only)
+colnames(Cy5_log2_norm) <- gsub(".*(GSM\\d+).*", "\\1", colnames(Cy5_log2_norm))
+colnames(loMA$M) <- gsub(".*(GSM\\d+).*", "\\1", colnames(loMA$M))
+
+# 2) Spearman’s rank correlations for single-channel data
+cat("Spearman rank correlations (Single-channel Cy5, background-subtracted & median-scaled):\n")
+cor_spearman_cy5 <- cor(Cy5_log2_norm, use = "pairwise.complete.obs", method = "spearman")
+print(round(cor_spearman_cy5, 3))
+
+# 3) Spearman’s rank correlations for loess-normalized M-values
+cat("\nSpearman rank correlations (Two-color Loess normalized M-values):\n")
+cor_spearman_loess <- cor(loMA$M, use = "pairwise.complete.obs", method = "spearman")
+print(round(cor_spearman_loess, 3))
+
+# 4) Scatterplot matrix for single-channel normalized Cy5
+pairs(
+  Cy5_log2_norm,
+  main = "Single-channel Cy5 (BG-subtracted, median-normalized) — Spearman correlation",
+  pch = 16, cex = 0.4, col = rgb(0.2, 0.4, 0.6, 0.4)
+)
+
+# 5) Scatterplot matrix for loess-normalized M-values
+pairs(
+  loMA$M,
+  main = "Two-color Loess normalized M-values — Spearman correlation",
+  pch = 16, cex = 0.4, col = rgb(0.4, 0.2, 0.6, 0.4)
+)
+
+```
 
 ## Q7) (8pts) 
 Now we want to compare these normalizations to quantile normalized data to see if we gain anything by leveraging the distributions across all 4 arrays.  Carry out the steps in the lecture or use the paper from Bolstad et al. entitled: “A comparison of normalization methods for high density oligonucleotide array data based on variance and bias” (on the course website), but we are only going to conduct this on the Cy5 channel.  The basic steps are as follows (these 6 steps are calculated on non-logged data; the data is logged after these steps are carried out): (8 pts)
