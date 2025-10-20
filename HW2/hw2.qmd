@@ -14,7 +14,7 @@ format:
 #### Professor Brandon Higgs  
 #### Gene Expression and Data Visualization  
 #### Johns Hopkins University  
-#### October 6th, 2025
+#### October 20th, 2025
 
 ## HW2:
 For this assignment, we will be evaluating different normalization methods on 2-channel arrays in which 4 biological samples were run.  The study is from GEO and the description of the experiment is provided as follows.
@@ -293,7 +293,6 @@ Cy5_log2 <- log2(Cy5_norm)
 
 # 6) Compute pairwise Pearson correlations across the 4 replicate arrays
 cor_mat <- cor(Cy5_log2, use = "pairwise.complete.obs", method = "pearson")
-print(round(cor_mat, 3))
 
 # 7) Visualize correlations as annotated heatmap
 ## Clean up axis labels for correlation heatmap
@@ -335,6 +334,7 @@ ggplot(df_cor, aes(Array1, Array2, fill = Correlation)) +
   )
 ```
 
+**Interpretation:** The background-subtracted, median-scaled Cy5 arrays show strong replicate agreement (r ≈ 0.95–0.97), confirming that single-channel normalization provides robust signal consistency comparable to two-color approaches discussed in lecture.
 
 ## Q6) Next calculate a Spearman’s rank correlation between all 4 arrays that you normalized in #5 and do the same with the M values from loess normalized data that you generated in #2.  Plot a scatter plot matrix for each of the two normalizations (pairs() function), and be sure to label the arrays and title the plot. Print the correlation coefficients to the screen. (4 pts)
 
@@ -347,54 +347,165 @@ ggplot(df_cor, aes(Array1, Array2, fill = Correlation)) +
 #| message: false
 
 # 1) Use single-channel normalized Cy5 log2 data from Q5
-Cy5_log2_norm <- log2(Cy5_lin_norm)
+Cy5_log2_norm <- log2(Cy5_norm)
 
 # Ensure consistent column names (GSM IDs only)
-colnames(Cy5_log2_norm) <- gsub(".*(GSM\\d+).*", "\\1", colnames(Cy5_log2_norm))
-colnames(loMA$M) <- gsub(".*(GSM\\d+).*", "\\1", colnames(loMA$M))
+clean_gsm <- function(x) sub(".*(GSM\\d+).*", "\\1", x)
+colnames(Cy5_log2_norm) <- clean_gsm(colnames(Cy5_log2_norm))
+colnames(loMA$M)        <- clean_gsm(colnames(loMA$M))
 
-# 2) Spearman’s rank correlations for single-channel data
-cat("Spearman rank correlations (Single-channel Cy5, background-subtracted & median-scaled):\n")
+# 2) Spearman’s rank correlations for single-channel data (DT table)
 cor_spearman_cy5 <- cor(Cy5_log2_norm, use = "pairwise.complete.obs", method = "spearman")
-print(round(cor_spearman_cy5, 3))
+datatable(round(cor_spearman_cy5, 3),
+          caption = "Spearman \u03C1 — Single-channel Cy5 (BG-subtracted, median-normalized, log2)",
+          options = list(dom = "t", paging = FALSE, ordering = FALSE),
+          class = "stripe hover cell-border compact") %>%
+  formatStyle(columns = colnames(cor_spearman_cy5), textAlign = "center")
 
-# 3) Spearman’s rank correlations for loess-normalized M-values
-cat("\nSpearman rank correlations (Two-color Loess normalized M-values):\n")
-cor_spearman_loess <- cor(loMA$M, use = "pairwise.complete.obs", method = "spearman")
-print(round(cor_spearman_loess, 3))
-
-# 4) Scatterplot matrix for single-channel normalized Cy5
+# 3) Scatterplot matrix for single-channel normalized Cy5
 pairs(
   Cy5_log2_norm,
-  main = "Single-channel Cy5 (BG-subtracted, median-normalized) — Spearman correlation",
-  pch = 16, cex = 0.4, col = rgb(0.2, 0.4, 0.6, 0.4)
+  main = "Single-channel Cy5 (BG-subtracted, median-normalized) — Spearman pairs",
+  pch = 16, cex = 0.4, col = rgb(0.2, 0.4, 0.6, 0.35)
 )
+
+# 4) Spearman’s rank correlations for loess-normalized M-values (DT table)
+cor_spearman_loess <- cor(loMA$M, use = "pairwise.complete.obs", method = "spearman")
+datatable(round(cor_spearman_loess, 3),
+          caption = "Spearman \u03C1 — Two-color Loess-normalized M-values",
+          options = list(dom = "t", paging = FALSE, ordering = FALSE),
+          class = "stripe hover cell-border compact") %>%
+  formatStyle(columns = colnames(cor_spearman_loess), textAlign = "center")
 
 # 5) Scatterplot matrix for loess-normalized M-values
 pairs(
   loMA$M,
-  main = "Two-color Loess normalized M-values — Spearman correlation",
-  pch = 16, cex = 0.4, col = rgb(0.4, 0.2, 0.6, 0.4)
+  main = "Two-color Loess-normalized M-values — Spearman pairs",
+  pch = 16, cex = 0.4, col = rgb(0.4, 0.2, 0.6, 0.35)
 )
 
 ```
 
 ## Q7) (8pts) 
 Now we want to compare these normalizations to quantile normalized data to see if we gain anything by leveraging the distributions across all 4 arrays.  Carry out the steps in the lecture or use the paper from Bolstad et al. entitled: “A comparison of normalization methods for high density oligonucleotide array data based on variance and bias” (on the course website), but we are only going to conduct this on the Cy5 channel.  The basic steps are as follows (these 6 steps are calculated on non-logged data; the data is logged after these steps are carried out): (8 pts)
-1. Subtract the foreground – background for each of the 4 chips for only the Cy5 channel.  This should all be on the linear or raw scale (no logging yet).
-2. Sort each column independently in this new matrix
-3. Calculate row means for the sorted matrix
-4. Create a new matrix with each row having the same values as the sorted row mean vectors from step #3 (you should have a new R matrix)
-5. Rank the columns independently on the original background subtracted matrix (from step #1)
+
+#### 1. Subtract the foreground – background for each of the 4 chips for only the Cy5 channel.  This should all be on the linear or raw scale (no logging yet).
+
+#### 2. Sort each column independently in this new matrix
+
+#### 3. Calculate row means for the sorted matrix
+
+#### 4. Create a new matrix with each row having the same values as the sorted row mean vectors from step #3 (you should have a new R matrix)
+
+#### 5. Rank the columns independently on the original background subtracted matrix (from step #1)
 Hint: use the rank() function with the argument ties=”first” or order()
-6. Reorder the columns in the new matrix from step #4 using the ranks from step #5
+
+#### 6. Reorder the columns in the new matrix from step #4 using the ranks from step #5
 
 To verify that each array has the same distribution, use the hist() function to look at various arrays (e.g., hist(c5.norm[,1]); hist(c5.norm[,2]); etc.).  Slight differences in distributions are a result of the ties in the ranking.
+
+```{r}
+## Q7) Quantile normalization of Cy5 channel
+#| label: q7-quantile-cy5
+#| echo: true
+#| warning: false
+#| message: false
+
+# 1. Subtract background from foreground on raw (linear) scale
+c5.raw <- Cy5_FG - Cy5_BG
+c5.raw[!is.finite(c5.raw) | c5.raw <= 0] <- NA_real_
+
+# 2. Sort each column independently
+c5.sorted <- apply(c5.raw, 2, sort, na.last = TRUE)
+
+# 3. Calculate row means across sorted values
+c5.mean <- rowMeans(c5.sorted, na.rm = TRUE)
+
+# 4. Create matrix with identical columns = row mean vector
+c5.R <- matrix(rep(c5.mean, ncol(c5.raw)), ncol = ncol(c5.raw))
+colnames(c5.R) <- colnames(c5.raw)
+rownames(c5.R) <- rownames(c5.raw)
+
+# 5. Rank each column of original background-subtracted matrix
+c5.rank <- apply(c5.raw, 2, rank, ties.method = "first", na.last = "keep")
+
+# 6. Reorder c5.R values using ranks from step 5 → new quantile-normalized matrix
+c5.norm <- matrix(NA_real_, nrow = nrow(c5.raw), ncol = ncol(c5.raw))
+colnames(c5.norm) <- colnames(c5.raw)
+rownames(c5.norm) <- rownames(c5.raw)
+
+for (i in seq_len(ncol(c5.raw))) {
+  ord <- order(c5.rank[, i], na.last = TRUE)
+  c5.norm[ord, i] <- c5.R[, i]
+}
+
+# ---- Verify identical distributions (log2-scaled histograms per array) ----
+op <- par(mfrow = c(2, 2))
+for (i in seq_len(ncol(c5.norm))) {
+  hist(
+    log2(c5.norm[, i]),
+    main = paste("Cy5 Quantile-Normalized — Array", i),
+    xlab = "Log2 Intensity (after QN)",
+    col = "gray80", border = "white", breaks = 50
+  )
+}
+par(op)
+```
 
 
 ## Q8) Now log (base 2) the new R matrix you created from step 6 (question #7) and calculate a Spearman’s rank correlation between the 4 arrays and plot a scatter plot matrix as you did before. Print the correlation coefficients to the screen. (5 pts)
 
+
+```{r}
+## Q8) Cy5 quantile-normalized (log2) — Spearman correlations (clean DT) + pairs()
+#| label: q8-cy5-qn-spearman
+#| echo: true
+#| warning: false
+#| message: false
+
+# 1) Log2-transform quantile-normalized Cy5 matrix from Q7
+c5.norm.log2 <- log2(c5.norm)
+
+# 2) Clean GSM IDs for column headers (do NOT touch rownames of the data matrix)
+clean_gsm <- function(x) sub(".*(GSM\\d+).*", "\\1", x)
+if (!is.null(colnames(c5.norm.log2))) {
+  colnames(c5.norm.log2) <- clean_gsm(colnames(c5.norm.log2))
+}
+
+# 3) Compute Spearman’s rank correlation matrix
+cor_qn_spear <- cor(c5.norm.log2, use = "pairwise.complete.obs", method = "spearman")
+
+# Ensure the correlation matrix has nice row/col names
+dimnames(cor_qn_spear) <- list(colnames(c5.norm.log2), colnames(c5.norm.log2))
+
+# 4) Display clean DT table (no bars, no paging/sorting)
+datatable(
+  round(cor_qn_spear, 3),
+  caption = "Spearman \u03C1 — Cy5 Quantile-normalized (log2)",
+  options = list(dom = "t", paging = FALSE, ordering = FALSE),
+  class = "stripe hover cell-border compact"
+) %>%
+  formatStyle(columns = colnames(cor_qn_spear), textAlign = "center")
+
+# 5) Scatterplot matrix
+pairs(
+  c5.norm.log2,
+  main = "Cy5 Quantile-normalized (log2) — Spearman Pairs",
+  pch = 16, cex = 0.4, col = rgb(0.1, 0.4, 0.7, 0.35)
+)
+```
+
 ## Q9) Of the 4 normalization methods, which do you suggest as optimal and why? (2.5 pts)
+
+Based on the diagnostic plots, quantile normalization provides the most consistent and effective correction for this dataset.
+
+In the M–A plots (Raw → Median → Loess → Print-tip Loess), both loess-based methods successfully removed the intensity-dependent curvature seen in the raw data, flattening the red loess line near zero and eliminating dye bias across all four arrays. However, small differences in the overall spread of log-ratios remained between chips, suggesting that while within-array bias was corrected, between-array scaling variation persisted.
+
+The single-channel Cy5 analysis (background-subtracted, median-scaled) already produced strong replicate agreement (r ≈ 0.95–0.97) as shown in the heatmap, confirming reliable measurement consistency. Yet, the quantile-normalized Cy5 data further improved between-array comparability, as demonstrated by nearly identical log₂ intensity histograms across all four arrays and slightly higher inter-array Spearman correlations (ρ ≈ 0.89–0.91).
+
+Consistent with lecture discussion, quantile normalization is optimal when arrays represent biologically similar samples—such as these four lean subject replicates—because it forces all distributions to match while preserving probe rank structure. This minimizes technical variability across chips without distorting true biological signal.
+
+Therefore, quantile normalization is the preferred method for this experiment: it achieves both within-array bias correction (like loess) and between-array distribution alignment, resulting in the most reproducible and statistically uniform data.
 
 ## Q10) Now we want to work with a qRT-PCR dataset from patients with an inflammatory disease. The genes measured for this experiment included a set of proinflammatory chemokines and cytokines that are related to the disease. Download the raw qRT-PCR file called Inflammation_qRT-PCR.csv. Then change the normalization script from the lecture notes to include the housekeeping genes beta actin, GAPDH, and 18S. Look at the file to make sure the housekeepers are spelled correctly. Run the normalization script and output a data matrix of fold change values.
 
