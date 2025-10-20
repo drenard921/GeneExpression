@@ -40,6 +40,8 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)
   library(purrr)
+  library(readr)
+  library(stringr)
 })
 
 # Path to the 4 GenePix files in cleaned_seqs
@@ -509,4 +511,157 @@ Therefore, quantile normalization is the preferred method for this experiment: i
 
 ## Q10) Now we want to work with a qRT-PCR dataset from patients with an inflammatory disease. The genes measured for this experiment included a set of proinflammatory chemokines and cytokines that are related to the disease. Download the raw qRT-PCR file called Inflammation_qRT-PCR.csv. Then change the normalization script from the lecture notes to include the housekeeping genes beta actin, GAPDH, and 18S. Look at the file to make sure the housekeepers are spelled correctly. Run the normalization script and output a data matrix of fold change values.
 
+```{r}
+# 1) Read raw instrument export ------------------------------------------------
+raw <- read_csv("Inflammation_qRT-PCR.csv", col_types = cols(.default = "c"))
+
+# The file has many meta rows; the actual table is already laid out
+# with fixed column positions. We'll take what we need by position:
+# col1: "Chamber ID" (not needed)
+# col2: **Sample ID** (e.g., "434_15")
+# col3: **Well Type** (NTC / Reference / Unknown)
+# col6: **Target gene name**
+# col8: **Reference gene name** (e.g., "B-actin")
+# col9: **Ct value** (numeric)
+
+# 2) Tidy subset: keep only Unknown wells (real samples), extract Sample/Gene/Ct
+tidy_ct <- raw %>%
+  transmute(
+    Sample   = .[[2]],   # sample identifier column
+    WellType = .[[3]],   # "Unknown", "NTC", "Reference"
+    Gene     = .[[6]],   # target gene name (MX1, IFIT1, GAPDH, 18S, etc.)
+    RefGene  = .[[8]],   # reference listed by instrument (often B-actin)
+    Ct       = suppressWarnings(as.numeric(.[[9]]))  # Ct value
+  ) %>%
+  filter(!is.na(WellType), str_to_lower(WellType) == "unknown") %>%
+  filter(!is.na(Gene), !is.na(Ct), is.finite(Ct)) %>%
+  mutate(
+    Sample = str_trim(Sample),
+    Gene   = str_trim(Gene),
+    RefGene= str_trim(RefGene)
+  )
+
+stopifnot(nrow(tidy_ct) > 0)
+
+# 3) Housekeeping genes (match common variants case/space/punct-insensitive)
+norm_str <- function(x) {
+  x %>% str_to_lower() %>% str_replace_all("[^a-z0-9]+", " ") %>% str_squish()
+}
+
+hk_aliases <- c("b actin","beta actin","actb","gapdh","18s","18s rrna")
+is_hk <- function(x) norm_str(x) %in% hk_aliases
+
+# 4) Compute mean HK Ct per Sample using targets GAPDH/18S/B-actin ----------
+# (We do **not** rely on the instrument's single 'Reference'—we average Ct of
+# B-actin, GAPDH, and 18S measured as *targets*, which are present in the file.)
+hk_ct <- tidy_ct %>%
+  filter(is_hk(Gene)) %>%
+  group_by(Sample) %>%
+  summarise(mean_HK_Ct = mean(Ct, na.rm = TRUE), .groups = "drop")
+
+if (nrow(hk_ct) == 0) {
+  stop("No housekeeping targets (B-actin/GAPDH/18S) found among Unknown wells.")
+}
+
+# 5) ΔCt = Ct_target − meanCt_housekeepers (per Sample) -----------------------
+qpcr_delta <- tidy_ct %>%
+  left_join(hk_ct, by = "Sample") %>%
+  mutate(deltaCt = Ct - mean_HK_Ct)
+
+# 6) Choose calibrator sample(s) ---------------------------------------------
+# If you have a known control sample ID, put it here, e.g.:
+# calibrator_samples <- c("434_1")
+# If not provided, default to the FIRST sample (alphabetically) for reproducibility.
+calibrator_samples <- NULL
+if (is.null(calibrator_samples) || length(calibrator_samples) == 0) {
+  calibrator_samples <- sort(unique(qpcr_delta$Sample))[1]
+}
+message("Calibrator sample(s): ", paste(calibrator_samples, collapse = ", "))
+
+# 7) ΔΔCt relative to calibrator mean ΔCt for each Gene; Fold-change ----------
+calibrator_means <- qpcr_delta %>%
+  filter(Sample %in% calibrator_samples) %>%
+  group_by(Gene) %>%
+  summarise(mean_deltaCt_cal = mean(deltaCt, na.rm = TRUE), .groups = "drop")
+
+qpcr_ddct <- qpcr_delta %>%
+  left_join(calibrator_means, by = "Gene") %>%
+  mutate(
+    deltaDeltaCt = deltaCt - mean_deltaCt_cal,
+    fold_change  = 2^(-deltaDeltaCt)
+  )
+
+# 8) Output matrices ----------------------------------------------------------
+# Per-sample fold-change matrix (rows = Sample, cols = Gene)
+fold_change_matrix <- qpcr_ddct %>%
+  select(Sample, Gene, fold_change) %>%
+  group_by(Sample, Gene) %>%                      # average tech replicates, if any
+  summarise(fold_change = mean(fold_change, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = Gene, values_from = fold_change) %>%
+  arrange(Sample)
+
+# Long table (tidy) for plotting/stats
+fold_change_long <- qpcr_ddct %>%
+  select(Sample, Gene, deltaCt, deltaDeltaCt, fold_change)
+
+# 9) Save & quick peek --------------------------------------------------------
+write_csv(fold_change_matrix, "qPCR_fold_change_matrix.csv")
+write_csv(fold_change_long,   "qPCR_fold_change_long.csv")
+
+print(head(fold_change_matrix, 5))
+```
+
 ## Q11) Read the normalized qRT-PCR data matrix into R, using a Spearman’s rank correlation, which two patients are most correlated? Plot these two patients against each other in a scatter plot. (3 pts) (interpretation)
+
+```{r}
+# 1) Read the matrix written in Q10
+fc <- read.csv("qPCR_fold_change_matrix.csv", check.names = FALSE, stringsAsFactors = FALSE)
+
+# If it has a "Sample" column, move it to rownames; otherwise assume col 1 is sample id
+if ("Sample" %in% names(fc)) {
+  rownames(fc) <- fc$Sample
+  fc <- fc %>% select(-Sample)
+} else {
+  rownames(fc) <- fc[[1]]
+  fc <- fc[, -1, drop = FALSE]
+}
+
+# Ensure numeric matrix
+fc <- fc %>% mutate(across(everything(), as.numeric))
+stopifnot(nrow(fc) >= 2, ncol(fc) >= 2)
+
+# 2) Spearman correlation among samples (rows)
+corr_matrix <- cor(t(fc), method = "spearman", use = "pairwise.complete.obs")
+print(round(corr_matrix, 3))
+
+# 3) Find the most correlated pair (exclude diagonal)
+corr_df <- as.data.frame(as.table(corr_matrix), stringsAsFactors = FALSE) %>%
+  filter(Var1 != Var2) %>%
+  arrange(desc(Freq))
+
+top_pair <- corr_df[1, , drop = FALSE]
+p1 <- top_pair$Var1
+p2 <- top_pair$Var2
+rho <- round(top_pair$Freq, 3)
+message("Most correlated pair: ", p1, " and ", p2, " (Spearman ρ = ", rho, ")")
+
+# 4) Build scatter data from the two ROWS across shared genes
+x <- as.numeric(fc[p1, ])
+y <- as.numeric(fc[p2, ])
+genes <- colnames(fc)
+
+plot_df <- tibble(Gene = genes, x = x, y = y) %>%
+  filter(is.finite(x), is.finite(y))
+
+# 5) Plot
+ggplot(plot_df, aes(x = x, y = y)) +
+  geom_point(size = 3, alpha = 0.9) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = paste0("Spearman correlation between ", p1, " and ", p2),
+    subtitle = paste0("ρ = ", rho, " (fold-change across genes)"),
+    x = paste0("Fold-change (", p1, ")"),
+    y = paste0("Fold-change (", p2, ")")
+  )
+```
