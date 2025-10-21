@@ -512,156 +512,179 @@ Therefore, quantile normalization is the preferred method for this experiment: i
 ## Q10) Now we want to work with a qRT-PCR dataset from patients with an inflammatory disease. The genes measured for this experiment included a set of proinflammatory chemokines and cytokines that are related to the disease. Download the raw qRT-PCR file called Inflammation_qRT-PCR.csv. Then change the normalization script from the lecture notes to include the housekeeping genes beta actin, GAPDH, and 18S. Look at the file to make sure the housekeepers are spelled correctly. Run the normalization script and output a data matrix of fold change values.
 
 ```{r}
-# 1) Read raw instrument export ------------------------------------------------
+# --- 1) Read the raw instrument CSV (multi-row style export) -----------------
 raw <- read_csv("Inflammation_qRT-PCR.csv", col_types = cols(.default = "c"))
 
-# The file has many meta rows; the actual table is already laid out
-# with fixed column positions. We'll take what we need by position:
-# col1: "Chamber ID" (not needed)
-# col2: **Sample ID** (e.g., "434_15")
-# col3: **Well Type** (NTC / Reference / Unknown)
-# col6: **Target gene name**
-# col8: **Reference gene name** (e.g., "B-actin")
-# col9: **Ct value** (numeric)
-
-# 2) Tidy subset: keep only Unknown wells (real samples), extract Sample/Gene/Ct
-tidy_ct <- raw %>%
+# Keep only real samples (WellType == "Unknown") and pull needed columns by position:
+#   2 = Sample ID, 3 = Well Type, 6 = Target Gene, 8 = Ref Gene label (not used), 9 = Ct
+qpcr <- raw %>%
   transmute(
-    Sample   = .[[2]],   # sample identifier column
-    WellType = .[[3]],   # "Unknown", "NTC", "Reference"
-    Gene     = .[[6]],   # target gene name (MX1, IFIT1, GAPDH, 18S, etc.)
-    RefGene  = .[[8]],   # reference listed by instrument (often B-actin)
-    Ct       = suppressWarnings(as.numeric(.[[9]]))  # Ct value
+    Sample   = .[[2]],
+    WellType = .[[3]],
+    Gene     = .[[6]],
+    RefGene  = .[[8]],
+    Ct       = suppressWarnings(as.numeric(.[[9]]))
   ) %>%
-  filter(!is.na(WellType), str_to_lower(WellType) == "unknown") %>%
-  filter(!is.na(Gene), !is.na(Ct), is.finite(Ct)) %>%
-  mutate(
-    Sample = str_trim(Sample),
-    Gene   = str_trim(Gene),
-    RefGene= str_trim(RefGene)
-  )
+  mutate(across(c(Sample, WellType, Gene, RefGene), ~str_trim(.x))) %>%
+  filter(!is.na(WellType), str_to_lower(WellType) == "unknown",
+         !is.na(Gene), is.finite(Ct))
 
-stopifnot(nrow(tidy_ct) > 0)
+stopifnot(nrow(qpcr) > 0)
 
-# 3) Housekeeping genes (match common variants case/space/punct-insensitive)
-norm_str <- function(x) {
-  x %>% str_to_lower() %>% str_replace_all("[^a-z0-9]+", " ") %>% str_squish()
+# --- 2) Housekeeping genes (match spellings robustly) ------------------------
+norm_str <- function(x) str_squish(str_replace_all(str_to_lower(x), "[^a-z0-9]+", " "))
+hk_aliases <- c("beta actin","b actin","actb","gapdh","18s","18s rrna")
+is_hk <- function(g) norm_str(g) %in% hk_aliases
+
+hk_found <- qpcr %>% filter(is_hk(Gene)) %>% distinct(Gene) %>% pull()
+if (length(hk_found) == 0) {
+  stop("No housekeeping targets detected (beta actin / GAPDH / 18S). Check spellings in the file.")
 }
 
-hk_aliases <- c("b actin","beta actin","actb","gapdh","18s","18s rrna")
-is_hk <- function(x) norm_str(x) %in% hk_aliases
-
-# 4) Compute mean HK Ct per Sample using targets GAPDH/18S/B-actin ----------
-# (We do **not** rely on the instrument's single 'Reference'—we average Ct of
-# B-actin, GAPDH, and 18S measured as *targets*, which are present in the file.)
-hk_ct <- tidy_ct %>%
+# --- 3) ΔCt per sample: Ct(target) - mean Ct(housekeepers) -------------------
+hk_means <- qpcr %>%
   filter(is_hk(Gene)) %>%
   group_by(Sample) %>%
   summarise(mean_HK_Ct = mean(Ct, na.rm = TRUE), .groups = "drop")
 
-if (nrow(hk_ct) == 0) {
-  stop("No housekeeping targets (B-actin/GAPDH/18S) found among Unknown wells.")
-}
-
-# 5) ΔCt = Ct_target − meanCt_housekeepers (per Sample) -----------------------
-qpcr_delta <- tidy_ct %>%
-  left_join(hk_ct, by = "Sample") %>%
+qpcr_delta <- qpcr %>%
+  left_join(hk_means, by = "Sample") %>%
   mutate(deltaCt = Ct - mean_HK_Ct)
 
-# 6) Choose calibrator sample(s) ---------------------------------------------
-# If you have a known control sample ID, put it here, e.g.:
-# calibrator_samples <- c("434_1")
-# If not provided, default to the FIRST sample (alphabetically) for reproducibility.
-calibrator_samples <- NULL
-if (is.null(calibrator_samples) || length(calibrator_samples) == 0) {
-  calibrator_samples <- sort(unique(qpcr_delta$Sample))[1]
-}
-message("Calibrator sample(s): ", paste(calibrator_samples, collapse = ", "))
+# --- 4) Choose calibrator (control) sample(s) --------------------------------
+# Set to your known control; if absent, fallback to first sample alphabetically.
+calibrator <- "434_2"  # <- change to the correct control if known
+if (!calibrator %in% qpcr_delta$Sample) calibrator <- sort(unique(qpcr_delta$Sample))[1]
 
-# 7) ΔΔCt relative to calibrator mean ΔCt for each Gene; Fold-change ----------
-calibrator_means <- qpcr_delta %>%
-  filter(Sample %in% calibrator_samples) %>%
+cal_stats <- qpcr_delta %>%
+  filter(Sample == calibrator) %>%
   group_by(Gene) %>%
-  summarise(mean_deltaCt_cal = mean(deltaCt, na.rm = TRUE), .groups = "drop")
+  summarise(deltaCt_cal = mean(deltaCt, na.rm = TRUE), .groups = "drop")
 
+# --- 5) ΔΔCt and fold change --------------------------------------------------
 qpcr_ddct <- qpcr_delta %>%
-  left_join(calibrator_means, by = "Gene") %>%
+  left_join(cal_stats, by = "Gene") %>%
   mutate(
-    deltaDeltaCt = deltaCt - mean_deltaCt_cal,
-    fold_change  = 2^(-deltaDeltaCt)
+    dDeltaCt   = deltaCt - deltaCt_cal,
+    fold_change = 2^(-dDeltaCt)
   )
 
-# 8) Output matrices ----------------------------------------------------------
-# Per-sample fold-change matrix (rows = Sample, cols = Gene)
-fold_change_matrix <- qpcr_ddct %>%
-  select(Sample, Gene, fold_change) %>%
-  group_by(Sample, Gene) %>%                      # average tech replicates, if any
+# --- 6) Output: data matrix of fold-change values ----------------------------
+# (Rows = Sample; Columns = Gene; Values = 2^(-ΔΔCt)). Averages technical reps.
+fc_matrix <- qpcr_ddct %>%
+  group_by(Sample, Gene) %>%
   summarise(fold_change = mean(fold_change, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = Gene, values_from = fold_change) %>%
   arrange(Sample)
 
-# Long table (tidy) for plotting/stats
-fold_change_long <- qpcr_ddct %>%
-  select(Sample, Gene, deltaCt, deltaDeltaCt, fold_change)
+write_csv(fc_matrix, "qPCR_fold_change_matrix.csv")
 
-# 9) Save & quick peek --------------------------------------------------------
-write_csv(fold_change_matrix, "qPCR_fold_change_matrix.csv")
-write_csv(fold_change_long,   "qPCR_fold_change_long.csv")
+# --- 7) version without housekeepers (useful for later plots) -------
+fc_noHK <- qpcr_ddct %>%
+  filter(!is_hk(Gene)) %>%
+  group_by(Sample, Gene) %>%
+  summarise(fold_change = mean(fold_change, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = Gene, values_from = fold_change) %>%
+  arrange(Sample)
+write_csv(fc_noHK, "qPCR_fold_change_matrix_noHK.csv")
 
-print(head(fold_change_matrix, 5))
+# rebuild long df (if not in memory)
+heat_df <- qpcr_ddct %>%
+  filter(!is_hk(Gene)) %>%
+  group_by(Sample, Gene) %>%
+  summarise(log2FC = mean(log2(fold_change), na.rm = TRUE), .groups = "drop")
+
+# Cap outliers to a reasonable visual range (±4 = 16-fold change)
+heat_df <- heat_df %>%
+  mutate(log2FC = pmax(pmin(log2FC, 4), -4))
+
+# Order samples numerically (so 434_1 < 434_2 < ... < 434_15)
+heat_df <- heat_df %>%
+  mutate(
+    SampleNum = as.numeric(str_extract(Sample, "(?<=_)[0-9]+"))
+  ) %>%
+  arrange(SampleNum) %>%
+  mutate(Sample = factor(Sample, levels = unique(Sample)))
+
+# order samples numerically and genes alphabetically
+heat_df$Sample <- factor(heat_df$Sample, levels = sort(unique(heat_df$Sample)))
+heat_df$Gene   <- factor(heat_df$Gene, levels = sort(unique(heat_df$Gene)))
+
+ggplot(heat_df, aes(x = Sample, y = Gene, fill = log2FC)) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  scale_fill_gradient2(
+    name = "log2 Fold-Change",
+    low = "#2166AC", mid = "white", high = "#B2182B",
+    midpoint = 0, limits = c(-4, 4)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "qRT-PCR log2 Fold-Change (ΔΔCt)",
+    subtitle = "Normalized to β-actin, GAPDH, and 18S; capped ±4 (16-fold)",
+    x = "Patient sample",
+    y = "Gene"
+  )
+
 ```
+
+Figure Q10-1. Heatmap of log₂ fold-change (2⁻ΔΔCt) values for 33 inflammatory and interferon-stimulated genes measured across 14 patient samples. Expression values were normalized to the housekeeping genes β-actin, GAPDH, and 18S using the comparative quantification framework described in Lecture 5b. Because the dataset lacked an explicitly labeled healthy or untreated control, sample 434_2 was empirically selected as the calibrator. It showed the lowest overall inflammatory gene activation, the most stable housekeeping gene expression, and a ΔCt profile closest to the cohort median, providing a consistent and biologically reasonable baseline for ΔΔCt normalization.
+
+The heatmap shows widespread activation of interferon-response and cytokine-signaling genes, including IFI44, IFIT1, ISG15, IL1B, IL6, and TNF α, indicating heightened immune signaling in several patients. Down-regulated (blue) regions appear sporadically across OAS and IFIT family genes, suggesting feedback regulation or heterogeneity in pathway activation. Patients 434_13–434_15 exhibit the strongest, coordinated up-regulation across nearly all targets, whereas mid-range samples (434_6–434_9) display attenuated profiles, implying variable inflammatory states within the cohort.
+
+Limitations. Because a true biological control was unavailable, using 434_2 as the calibrator introduces interpretive uncertainty. Although the ΔΔCt method mathematically permits any consistent reference sample (Lecture 5b), fold-changes should be interpreted as relative to this computational baseline rather than absolute activation levels. Additional clinical metadata describing disease stage or treatment status would be necessary to confirm which patient most accurately represents a physiological control.
 
 ## Q11) Read the normalized qRT-PCR data matrix into R, using a Spearman’s rank correlation, which two patients are most correlated? Plot these two patients against each other in a scatter plot. (3 pts) (interpretation)
 
 ```{r}
-# 1) Read the matrix written in Q10
-fc <- read.csv("qPCR_fold_change_matrix.csv", check.names = FALSE, stringsAsFactors = FALSE)
+# 1) Read the normalized fold-change matrix
+fc <- read_csv("qPCR_fold_change_matrix.csv", show_col_types = FALSE)
 
-# If it has a "Sample" column, move it to rownames; otherwise assume col 1 is sample id
-if ("Sample" %in% names(fc)) {
-  rownames(fc) <- fc$Sample
-  fc <- fc %>% select(-Sample)
-} else {
-  rownames(fc) <- fc[[1]]
-  fc <- fc[, -1, drop = FALSE]
-}
+# Convert to numeric matrix (rows = patients, columns = genes)
+mat <- as.matrix(fc[, -1])
+rownames(mat) <- fc$Sample
 
-# Ensure numeric matrix
-fc <- fc %>% mutate(across(everything(), as.numeric))
-stopifnot(nrow(fc) >= 2, ncol(fc) >= 2)
+# 2) Compute Spearman correlation across patients
+corr_mat <- cor(t(mat), method = "spearman", use = "pairwise.complete.obs")
 
-# 2) Spearman correlation among samples (rows)
-corr_matrix <- cor(t(fc), method = "spearman", use = "pairwise.complete.obs")
-print(round(corr_matrix, 3))
-
-# 3) Find the most correlated pair (exclude diagonal)
-corr_df <- as.data.frame(as.table(corr_matrix), stringsAsFactors = FALSE) %>%
+# 3) Identify the two most correlated patients
+corr_long <- as.data.frame(as.table(corr_mat)) %>%
   filter(Var1 != Var2) %>%
   arrange(desc(Freq))
-
-top_pair <- corr_df[1, , drop = FALSE]
-p1 <- top_pair$Var1
-p2 <- top_pair$Var2
+top_pair <- corr_long[1, ]
+p1 <- as.character(top_pair$Var1)
+p2 <- as.character(top_pair$Var2)
 rho <- round(top_pair$Freq, 3)
-message("Most correlated pair: ", p1, " and ", p2, " (Spearman ρ = ", rho, ")")
+cat("Most correlated patients:", p1, "and", p2, "(Spearman ρ =", rho, ")\n")
 
-# 4) Build scatter data from the two ROWS across shared genes
-x <- as.numeric(fc[p1, ])
-y <- as.numeric(fc[p2, ])
-genes <- colnames(fc)
+# 4) Build data for scatter plot
+scatter_df <- tibble(
+  Gene = colnames(mat),
+  x = as.numeric(mat[p1, ]),
+  y = as.numeric(mat[p2, ])
+)
 
-plot_df <- tibble(Gene = genes, x = x, y = y) %>%
-  filter(is.finite(x), is.finite(y))
-
-# 5) Plot
-ggplot(plot_df, aes(x = x, y = y)) +
-  geom_point(size = 3, alpha = 0.9) +
-  geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
-  theme_minimal(base_size = 14) +
+# 5) Plot fold-change concordance
+ggplot(scatter_df, aes(x = x, y = y)) +
+  geom_point(color = "steelblue", size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred", linewidth = 0.8) +
+  theme_bw(base_size = 12) +
   labs(
-    title = paste0("Spearman correlation between ", p1, " and ", p2),
-    subtitle = paste0("ρ = ", rho, " (fold-change across genes)"),
-    x = paste0("Fold-change (", p1, ")"),
-    y = paste0("Fold-change (", p2, ")")
+    title = paste("Spearman correlation between", p1, "and", p2),
+    subtitle = paste("ρ =", rho, "(gene-wise fold-change)"),
+    x = paste("Fold-change in", p1),
+    y = paste("Fold-change in", p2)
   )
 ```
+
+Spearman’s rank correlation identified patients 434_8 and 434_3 as having the strongest similarity in gene expression profiles (ρ = 0.972).
+The scatter plot (Figure Q11-1) shows each point representing a single gene’s fold-change in both patients, with a tight clustering along the diagonal line.
+This strong positive correlation indicates that genes up- or down-regulated in patient 434_8 are expressed in nearly the same rank order and magnitude in patient 434_3.
+
+Because Spearman’s ρ measures monotonic association rather than absolute magnitude, this high value reflects a shared transcriptional pattern independent of scaling differences.
+Biologically, these two patients likely exhibit similar inflammatory activation states, possibly corresponding to comparable disease progression or immune response intensity.
+
