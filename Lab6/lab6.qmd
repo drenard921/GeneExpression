@@ -14,7 +14,7 @@ format:
 #### Professor Brandon Higgs  
 #### Gene Expression and Data Visualization  
 #### Johns Hopkins University  
-#### October 6th, 2025
+#### October 23rd, 2025
 
 ## Lab6 
 In this lab, we will be working with an Affymetrix data set that was run on the human HGU95A array.  This experiment was designed to assess the gene expression events in the frontal cortex due to aging.  A total of 18 male and 12 female postmortem brain samples were obtained to assess this.
@@ -29,37 +29,508 @@ For the second part of this lab, you will be working with RNA-sequencing data fr
 ## Q1) Download the GEO Brain Aging study from the class website.  Also obtain the annotation file for this data frame.
 
 ## Q2) Load into R, using read.table() function and the header=T/row.names=1 arguments for each data file.
+```{r}
+## Q1–Q2
+library(DT)
+
+
+# Gender-associated probes
+g.g <- c(1394,1474,1917,2099,2367,2428,2625,3168,3181,3641,3832,4526,4731,
+         4863,6062,6356,6684,6787,6900,7223,7244,7299,8086,8652,8959,9073,
+         9145,9389,10219,11238,11669,11674,11793)
+
+# Age-associated probes
+g.a <- c(25,302,1847,2324,246,2757,3222,3675,4429,4430,4912,5640,5835,
+         5856,6803,7229,7833,8133,8579,8822,8994,10101,11433,12039,12353,
+         12404,12442,67,88,100)
+
+affy_expr <- read.table("agingStudy11FCortexAffy.txt",
+                        header = TRUE, row.names = 1, sep = "\t")
+
+affy_anno <- read.table("agingStudy1FCortexAffyAnn.txt",
+                        header = TRUE, sep = "\t")
+
+
+
+dim(affy_expr)
+head(affy_expr[, 1:5])
+head(affy_anno)
+```
+
 
 ## Q3) Prepare 2 separate vectors for comparison.  The first is a comparison between male and female patients.  The current data frame can be left alone for this, since the males and females are all grouped together.  The second vector is comparison between patients >= 50 years of age and those < 50 years of age. To do this, you must use the annotation file and logical operators to isolate the correct arrays/samples.
 
+```{r}
+## Q3) Comparison vectors (M vs F) and (>=50 vs <50)
+
+# 1) Extract GSM IDs from expression column names (drop ".age.sex")
+expr_ids_full <- colnames(affy_expr)
+expr_ids_gsm  <- sub("\\..*$", "", expr_ids_full)  # "GSM27015" from "GSM27015.26.M"
+
+# 2) Align annotation to expression columns by GSM ID
+affy_anno <- affy_anno[match(expr_ids_gsm, affy_anno$ID), ]
+stopifnot(identical(affy_anno$ID, expr_ids_gsm))
+
+# 3) Build groups
+sex_fac <- factor(affy_anno$Gender, levels = c("M","F"))
+age_num <- as.numeric(affy_anno$Age)
+age_fac <- factor(ifelse(age_num >= 50, ">=50", "<50"), levels = c("<50", ">=50"))
+
+idx_male   <- which(sex_fac == "M")
+idx_female <- which(sex_fac == "F")
+idx_lt50   <- which(age_fac == "<50")
+idx_ge50   <- which(age_fac == ">=50")
+
+wrap_html <- function(v) sprintf("<div style='white-space:normal;'>%s</div>", paste(v, collapse = ", "))
+
+# --- Sex table ---
+sex_tbl <- data.frame(
+  Group   = c("M", "F"),
+  Qty     = c(length(idx_male), length(idx_female)),
+  Samples = c(wrap_html(expr_ids_full[idx_male]),
+              wrap_html(expr_ids_full[idx_female])),
+  stringsAsFactors = FALSE
+)
+
+# --- Age table ---
+age_tbl <- data.frame(
+  Group   = c("<50", ">=50"),
+  Qty     = c(length(idx_lt50), length(idx_ge50)),
+  Samples = c(wrap_html(expr_ids_full[idx_lt50]),
+              wrap_html(expr_ids_full[idx_ge50])),
+  stringsAsFactors = FALSE
+)
+
+# --- Render clean tables ---
+datatable(
+  sex_tbl, rownames = FALSE, escape = FALSE,
+  options = list(paging = FALSE, dom = 't', scrollX = TRUE)
+)
+
+datatable(
+  age_tbl, rownames = FALSE, escape = FALSE,
+  options = list(paging = FALSE, dom = 't', scrollX = TRUE)
+)
+```
+
 ## Q4) Run the t.test function from the notes using the first gene vector below for the gender comparison.  Then use the second gene vector below for the age comparison.  Using these p-values, use either p.adjust in the base library or mt.rawp2adjp in the multtest library to adjust the values for multiple corrections with the Holm's method.
+```{r}
+## Q4) t-tests and Holm’s correction
+# Function to run unpaired equal-variance t-tests for a set of probes
+run_ttests <- function(expr, probe_idx, group_factor) {
+  sapply(probe_idx, function(i) {
+    x <- as.numeric(expr[i, ])
+    t.test(x ~ group_factor, var.equal = TRUE)$p.value
+  })
+}
+
+# --- (a) Gender comparison ---
+p_gender <- run_ttests(affy_expr, g.g, sex_fac)
+p_gender_holm <- p.adjust(p_gender, method = "holm")
+
+# Combine into a results data frame
+res_gender <- data.frame(
+  Probe = rownames(affy_expr)[g.g],
+  Raw_p  = signif(p_gender, 4),
+  Holm_p = signif(p_gender_holm, 4)
+)
+
+# --- (b) Age comparison ---
+p_age <- run_ttests(affy_expr, g.a, age_fac)
+p_age_holm <- p.adjust(p_age, method = "holm")
+
+res_age <- data.frame(
+  Probe = rownames(affy_expr)[g.a],
+  Raw_p  = signif(p_age, 4),
+  Holm_p = signif(p_age_holm, 4)
+)
+datatable(
+  res_gender, rownames = FALSE,
+  caption = "Q4a. Gender comparison: raw and Holm-adjusted p-values",
+  options = list(paging = FALSE, dom = 't')
+)
+
+datatable(
+  res_age, rownames = FALSE,
+  caption = "Q4b. Age comparison: raw and Holm-adjusted p-values",
+  options = list(paging = FALSE, dom = 't')
+)
+```
 
 ## Q5) Sort the adjusted p-values and non-adjusted p-values and plot them vs. the x-axis of numbers for each comparison data set.  Make sure that the two lines are different colors.  Also make sure that the p-values are sorted before plotting.
+```{r}
+## Q5) Sorted p-values: raw vs Holm-adjusted
+
+# --- Gender comparison ---
+ord_gender_raw  <- sort(p_gender)
+ord_gender_holm <- sort(p_gender_holm)
+n_gender <- length(ord_gender_raw)
+
+plot(1:n_gender, ord_gender_raw, type = "l", col = "blue", lwd = 2,
+     xlab = "Gene index (sorted by ascending p-value)",
+     ylab = "p-value",
+     ylim = c(0,0.1),
+     main = "Gender Comparison: Raw vs Holm-adjusted p-values")
+lines(1:n_gender, ord_gender_holm, col = "red", lwd = 2, lty = 2)
+abline(h = 0.05, col = "darkgray", lty = 3)
+legend("topleft", legend = c("Raw p-values", "Holm-adjusted"),
+       col = c("blue", "red"), lwd = 2, lty = c(1,2), bty = "n")
+
+# --- Age comparison ---
+ord_age_raw  <- sort(p_age)
+ord_age_holm <- sort(p_age_holm)
+n_age <- length(ord_age_raw)
+
+plot(1:n_age, ord_age_raw, type = "l", col = "blue", lwd = 2,
+     xlab = "Gene index (sorted by ascending p-value)",
+     ylab = "p-value",
+     ylim = c(0,0.1),
+     main = "Age Comparison: Raw vs Holm-adjusted p-values")
+lines(1:n_age, ord_age_holm, col = "red", lwd = 2, lty = 2)
+abline(h = 0.05, col = "darkgray", lty = 3)
+legend("topleft", legend = c("Raw p-values", "Holm-adjusted"),
+       col = c("blue", "red"), lwd = 2, lty = c(1,2), bty = "n")
+```
+
+**Figure Q5 Interpretation:** Sorted p-value plots for the gender and age comparisons, each restricted to a 0–0.05 y-axis range to highlight the significance region. The x-axis represents the gene index ranked by ascending p-value (1 = smallest, N = largest). Blue lines show raw p-values, and red dashed lines show Holm-adjusted p-values. In the gender dataset, several genes approach or fall below the 0.05 threshold before correction, suggesting potential sex-associated expression differences. After Holm adjustment, these p-values increase but a few may remain near the cutoff, indicating marginal significance. The age comparison shows generally higher p-values, with both raw and adjusted values clustering near zero for only a small subset of probes. Overall, the Holm correction reduces apparent significance and better reflects the limited sample size and multiple-testing context emphasized in the lecture examples.
 
 ## Q6) Repeat #4 and #5 with the Bonferroni method.
+```{r}
+## Q6) Repeat analysis using Bonferroni correction (y-axis 0–0.10)
+
+# --- (a) Gender comparison ---
+p_gender_bonf <- p.adjust(p_gender, method = "bonferroni")
+
+# --- (b) Age comparison ---
+p_age_bonf <- p.adjust(p_age, method = "bonferroni")
+
+# --- Plot: Gender and Age (Raw vs Bonferroni) ---
+
+# Gender
+ord_gender_raw  <- sort(p_gender)
+ord_gender_bonf <- sort(p_gender_bonf)
+n_gender <- length(ord_gender_raw)
+
+plot(1:n_gender, ord_gender_raw, type = "l", col = "blue", lwd = 2,
+     ylim = c(0, 0.10),
+     xlab = "Gene index (sorted by ascending p-value)",
+     ylab = "p-value",
+     main = "Gender Comparison: Raw vs Bonferroni-adjusted")
+lines(1:n_gender, ord_gender_bonf, col = "red", lwd = 2, lty = 2)
+abline(h = 0.05, col = "darkgray", lty = 3)
+legend("topleft", legend = c("Raw p-values", "Bonferroni-adjusted"),
+       col = c("blue", "red"), lwd = 2, lty = c(1,2), bty = "n")
+
+# Age
+ord_age_raw  <- sort(p_age)
+ord_age_bonf <- sort(p_age_bonf)
+n_age <- length(ord_age_raw)
+
+plot(1:n_age, ord_age_raw, type = "l", col = "blue", lwd = 2,
+     ylim = c(0, 0.10),
+     xlab = "Gene index (sorted by ascending p-value)",
+     ylab = "p-value",
+     main = "Age Comparison: Raw vs Bonferroni-adjusted")
+lines(1:n_age, ord_age_bonf, col = "red", lwd = 2, lty = 2)
+abline(h = 0.05, col = "darkgray", lty = 3)
+legend("topleft", legend = c("Raw p-values", "Bonferroni-adjusted"),
+       col = c("blue", "red"), lwd = 2, lty = c(1,2), bty = "n")
+
+```
+
+Figure 6 Interpretation: Figure 6 applies the Bonferroni correction to the same gender and age comparisons shown in Figure 5, replacing Holm’s stepwise adjustment with Bonferroni’s uniform scaling. As expected, Bonferroni inflates p-values more strongly, resulting in a steeper upward curve across the sorted gene index. In the gender comparison, the number of probes remaining below the 0.05 significance threshold decreased from twelve under Holm correction to nine under Bonferroni, reflecting the stricter nature of Bonferroni’s family-wise error control. This inflation was most apparent among the mid- to higher-ranked genes, where several probes that were marginally significant under Holm were pushed above the cutoff after Bonferroni adjustment. In contrast, the age comparison remained stable across correction methods: the same small subset of probes—about five—retained high p-values, and the overall pattern of raw and adjusted distributions changed little. Together, these results demonstrate that Bonferroni correction more aggressively reduces apparent significance in the gender dataset, while datasets with fewer borderline findings, such as the age comparison, remain largely unaffected by the choice of correction method.
+
+```{r}
+# Threshold for significance
+alpha <- 0.05
+
+# --- Gender comparison ---
+sig_gender_idx <- which(p_gender_bonf < alpha)
+sig_gender_tbl <- data.frame(
+  Probe_ID = rownames(affy_expr)[g.g[sig_gender_idx]],
+  Raw_p    = p_gender[sig_gender_idx],
+  Bonf_p   = p_gender_bonf[sig_gender_idx],
+  stringsAsFactors = FALSE
+)
+
+# Sort from smallest to largest adjusted p-value
+sig_gender_tbl <- sig_gender_tbl[order(sig_gender_tbl$Bonf_p), ]
+sig_gender_tbl$Raw_p  <- signif(sig_gender_tbl$Raw_p, 4)
+sig_gender_tbl$Bonf_p <- signif(sig_gender_tbl$Bonf_p, 4)
+
+# --- Age comparison ---
+sig_age_idx <- which(p_age_bonf < alpha)
+sig_age_tbl <- data.frame(
+  Probe_ID = rownames(affy_expr)[g.a[sig_age_idx]],
+  Raw_p    = p_age[sig_age_idx],
+  Bonf_p   = p_age_bonf[sig_age_idx],
+  stringsAsFactors = FALSE
+)
+
+sig_age_tbl <- sig_age_tbl[order(sig_age_tbl$Bonf_p), ]
+sig_age_tbl$Raw_p  <- signif(sig_age_tbl$Raw_p, 4)
+sig_age_tbl$Bonf_p <- signif(sig_age_tbl$Bonf_p, 4)
+
+# --- Render DT tables (ranked smallest → largest Bonferroni p-value) ---
+datatable(
+  sig_gender_tbl,
+  caption = "Significant probes after Bonferroni correction – Gender comparison (ranked by adjusted p-value)",
+  rownames = FALSE,
+  options = list(paging = FALSE, dom = 't')
+)
+
+datatable(
+  sig_age_tbl,
+  caption = "Significant probes after Bonferroni correction – Age comparison (ranked by adjusted p-value)",
+  rownames = FALSE,
+  options = list(paging = FALSE, dom = 't')
+)
+```
+
 
 ## Q7) Read in the log2 normalized fragments per kb per million mapped reads (FPKM) data matrix and annotation files. This is RNA-sequencing data that has normalized read counts on a similar scale to microarray intensities.
+```{r}
+## Q7) Load TCGA BRCA log2(FPKM) and align to SAM (patient-level)
+
+# 1) Read files
+tcga_expr <- read.table("tcga_brca_fpkm.txt",
+                        header = TRUE, row.names = 1, sep = "\t", check.names = FALSE)
+tcga_sam  <- read.table("tcga_brca_fpkm_sam.txt",
+                        header = TRUE, sep = "\t", check.names = FALSE)
+
+# 2) Standardize barcodes
+expr_ids_std <- gsub("\\.", "-", colnames(tcga_expr))
+expr_pat12   <- substr(expr_ids_std, 1, 12)                    # patient barcode (e.g., TCGA-FD-A3NA)
+
+sam_ids_std  <- gsub("\\.", "-", as.character(tcga_sam$bcr_patient_barcode))
+sam_pat12    <- substr(sam_ids_std, 1, 12)                     # should already be 12-char
+
+# 3) Collapse expression to one column per patient by averaging aliquots (if any)
+#    rows = genes, columns = samples -> transpose, group rows by patient, then transpose back
+expr_sum  <- rowsum(t(tcga_expr), group = expr_pat12)          # sum across aliquots per patient
+expr_n    <- as.vector(table(expr_pat12))                      # counts per patient (sorted like rowsum rownames)
+tcga_expr_pat <- t(expr_sum / expr_n[col(expr_sum)[,1]])       # mean per patient
+
+# Ensure column order follows the rowsum rownames (patient IDs)
+stopifnot(identical(colnames(tcga_expr_pat), rownames(expr_sum)))
+
+# 4) Align to SAM order and drop unmatched safely
+match_idx <- match(sam_pat12, colnames(tcga_expr_pat))
+keep <- !is.na(match_idx)
+
+tcga_expr_pat <- tcga_expr_pat[, match_idx[keep], drop = FALSE]
+tcga_sam_aln  <- tcga_sam[keep, , drop = FALSE]
+
+# Rename columns to the patient barcode for clarity
+colnames(tcga_expr_pat) <- sam_pat12[keep]
+
+# 5) Create survival-ready fields for downstream steps
+tcga_sam_aln$time   <- suppressWarnings(as.numeric(tcga_sam_aln$months_to_event))
+tcga_sam_aln$status <- ifelse(toupper(tcga_sam_aln$vital_status) == "DECEASED", 1L, 0L)
+
+```
 
 ## Q8) Use grep to subset the data matrix only by gene ‘GATA3’ and make sure to cast this vector to numeric.
+```{r}
+# Use the patient-level matrix from Q7
+expr_mat <- tcga_expr_pat  # genes × patients
+
+# 1) Locate GATA3 (case-insensitive, supports ENSG/pipe suffixes)
+gata_rows <- grep("^GATA3(\\b|\\|)", rownames(expr_mat), ignore.case = TRUE)
+stopifnot(length(gata_rows) >= 1)
+
+# 2) Extract and cast to numeric
+gata_mat <- expr_mat[gata_rows, , drop = FALSE]
+gata3 <- if (nrow(gata_mat) == 1) as.numeric(gata_mat[1, ]) else as.numeric(colMeans(gata_mat, na.rm = TRUE))
+names(gata3) <- colnames(expr_mat)
+
+# 3) Create a tidy dataframe for display
+gata_tbl <- data.frame(
+  Sample_ID = names(gata3),
+  GATA3_log2FPKM = signif(gata3, 4),
+  stringsAsFactors = FALSE
+)
+
+# 4) Render interactive table
+datatable(
+  gata_tbl,
+  caption = "GATA3 expression across TCGA BRCA samples (log₂ FPKM)",
+  rownames = FALSE,
+  options = list(pageLength = 10)
+)
+
+```
 
 ## Q9) Create a binary (1/0) vector for the patients where the upper 25% expression of GATA3 is coded as 1 and all other patients are coded as 0. Call this new variable ‘group’.
 
+```{r}
+## Q9) Create binary vector for upper 25% GATA3 expression
+
+# 1) Ensure GATA3 vector is numeric and aligned to patient order
+stopifnot(is.numeric(gata3))
+
+# 2) Calculate the 75th percentile cutoff
+gata_cut <- quantile(gata3, 0.75, na.rm = TRUE)
+
+# 3) Define binary group: 1 = upper 25% (high expression), 0 = remaining 75%
+group <- ifelse(gata3 >= gata_cut, 1L, 0L)
+names(group) <- names(gata3)
+
+# 4) Combine with expression for clarity
+gata_group_tbl <- data.frame(
+  Sample_ID = names(gata3),
+  GATA3_log2FPKM = signif(gata3, 4),
+  Group = group,
+  stringsAsFactors = FALSE
+)
+
+# 5) Visualize
+datatable(
+  gata_group_tbl,
+  caption = "Binary grouping of patients by GATA3 expression (upper 25% = 1)",
+  rownames = FALSE,
+)
+```
+
 ## Q10) Create a data matrix with the ‘group’ variable you created in #9 and the remaining variables in the annotation file. 
+```{r}
+## Q10) Merge binary GATA3 group with clinical annotation
+
+# 1) Make sure identifiers align between GATA3 vector and SAM
+expr_ids <- substr(names(gata3), 1, 12)
+sam_ids  <- substr(gsub("\\.", "-", tcga_sam_aln$bcr_patient_barcode), 1, 12)
+
+# 2) Match annotation rows to GATA3 order
+match_idx <- match(expr_ids, sam_ids)
+
+# 3) Combine into one data frame
+gata_clin_df <- data.frame(
+  Patient_ID = expr_ids,
+  GATA3_log2FPKM = signif(gata3, 4),
+  Group = group,
+  tcga_sam_aln[match_idx, c(
+    "age_at_initial_pathologic_diagnosis",
+    "gender",
+    "vital_status",
+    "months_to_event",
+    "time",
+    "status"
+  )],
+  stringsAsFactors = FALSE
+)
+
+# 4) Display as a DT table
+datatable(
+  gata_clin_df,
+  caption = "Merged TCGA BRCA annotation with GATA3 grouping (Group = 1 → high expression)",
+  rownames = FALSE,
+)
+```
 
 ## Q11) Run a Kaplan-Meier (KM) analysis to determine if a difference in survival experience exists between the two GATA3 expression groups using the survdiff function. Extract the p-value from the chi squared test output.
+```{r}
+## Q11) Kaplan–Meier (KM) survival comparison: high vs. low GATA3 expression
+
+library(survival)
+
+# 1) Prepare survival object
+# Ensure time and status are numeric and aligned
+surv_obj <- Surv(time = gata_clin_df$time, event = gata_clin_df$status)
+
+# 2) Run log-rank test between groups (1 = high GATA3, 0 = low)
+km_test <- survdiff(surv_obj ~ gata_clin_df$Group)
+
+# 3) Extract p-value from chi-squared statistic
+chisq_val <- km_test$chisq
+p_val <- 1 - pchisq(chisq_val, df = 1)
+
+# 4) Display results
+p_val_fmt <- signif(p_val, 4)
+cat("Log-rank test Chi-squared =", round(chisq_val, 3),
+    "with p-value =", p_val_fmt, "\n")
+```
+
+**Result interpretation:** Although the GATA3-high group showed a modest survival advantage relative to the GATA3-low group, the difference did not reach statistical significance (χ² = 3.215, p = 0.073). This suggests a possible but inconclusive association between GATA3 expression and patient survival in the TCGA BRCA cohort.
 
 ## Q12) Now run a Cox proportion hazard (PH) regression model on just the grouping variable (i.e. no other covariates) and extract both the p-value and hazard ratio from the output.
+```{r}
+## Q12) Cox Proportional Hazards (PH) model using GATA3 group
+
+# 1) Create survival object
+surv_obj <- Surv(time = gata_clin_df$time, event = gata_clin_df$status)
+
+# 2) Fit Cox PH model with GATA3 group as the only predictor
+cox_model <- coxph(surv_obj ~ gata_clin_df$Group)
+
+# 3) Summarize results
+cox_summary <- summary(cox_model)
+
+# 4) Extract hazard ratio (HR) and p-value
+hr <- signif(cox_summary$coef[,"exp(coef)"], 4)
+p_val <- signif(cox_summary$coef[,"Pr(>|z|)"], 4)
+
+cat("Hazard Ratio (HR) =", hr, "\n")
+cat("p-value =", p_val, "\n")
+```
+
+**Result Interpretation:** The Cox PH model (HR = 0.43, p = 0.082) indicates that higher GATA3 expression is associated with a lower hazard of death, though this relationship does not reach statistical significance. This aligns with the Kaplan–Meier result showing a similar trend toward improved survival among patients with elevated GATA3 expression.
 
 ## Q13) Run the survfit() function only on the grouping variable (i.e. no other covariates) and plot the KM curves, being sure to label the two groups with a legend, two different colors for each line, and provide the KM p-value, Cox PH p-value, Cox PH hazard ratio, and sample sizes all in each of the two groups all on the plot.
+```{r}
+## Q13) KM curves (survfit) for GATA3 groups with on-plot stats
+
+library(survival)
+
+# ----- data prep (complete cases only) -----
+dat <- gata_clin_df
+cc  <- complete.cases(dat$time, dat$status, dat$Group)
+dat <- dat[cc, ]
+
+# n per group
+n0 <- sum(dat$Group == 0, na.rm = TRUE)  # low (bottom 75%)
+n1 <- sum(dat$Group == 1, na.rm = TRUE)  # high (top 25%)
+
+# ----- KM fit (no covariates) -----
+fit <- survfit(Surv(time, status) ~ Group, data = dat)
+
+# ----- KM (log-rank) p-value -----
+km_test <- survdiff(Surv(time, status) ~ Group, data = dat)
+km_p <- 1 - pchisq(km_test$chisq, df = 1)
+
+# ----- Cox PH (univariate) -----
+cox_mod <- coxph(Surv(time, status) ~ Group, data = dat)
+cx      <- summary(cox_mod)
+cox_hr  <- cx$coef[,"exp(coef)"]
+cox_p   <- cx$coef[,"Pr(>|z|)"]
+
+# ----- plot -----
+cols <- c("steelblue3", "firebrick2")   # 0 = blue (low), 1 = red (high)
+plot(fit,
+     col = cols, lwd = 2, mark.time = TRUE, conf.int = FALSE,
+     xlab = "Months to event", ylab = "Survival probability",
+     main = "Kaplan–Meier survival by GATA3 expression group")
+
+legend("bottomleft",
+       legend = c(paste0("GATA3 low (n=", n0, ")"),
+                  paste0("GATA3 high (n=", n1, ")")),
+       col = cols, lwd = 2, bty = "n")
+
+# stats block shown on the figure
+stats_text <- c(
+  paste0("KM p-value = ", signif(km_p, 3)),
+  paste0("Cox p-value = ", signif(cox_p, 3)),
+  paste0("Cox HR = ", signif(cox_hr, 3))
+)
+legend("topright", legend = stats_text, bty = "n")
+
+# (Optional) add light grid
+abline(h = seq(0, 1, by = 0.2), v = pretty(dat$time), col = "gray90", lwd = 1)
+```
 
 ## Q14) Does this result agree with the Mehra et al, study result?
 
-## Gene Vectors (indices for specific rows/genes)
-#### gender comparison gene vector
-g.g <- c(1394,  1474,  1917,  2099,  2367,  2428, 2625,  3168,  3181,  3641,  3832,  4526,
-4731,  4863,  6062,  6356,  6684,  6787,  6900,  7223,  7244,  7299,  8086,  8652,
-8959,  9073,  9145,  9389, 10219, 11238, 11669, 11674, 11793)
+The present TCGA analysis shows that patients in the top quartile of GATA3 expression exhibit a trend toward improved survival (HR = 0.43, p = 0.082), indicating a lower hazard of death compared with those with lower expression.
+This agrees directionally with the results of Mehra et al. (2005), who found that low GATA3 expression was associated with higher tumor grade, ER-negativity, and markedly poorer disease-free and overall survival (univariate HR = 0.31, p = 0.009).
+The difference lies in statistical strength—our analysis did not reach significance, likely due to smaller effective sample size and lack of adjustment for confounders such as tumor subtype or ER status.
+Overall, both datasets support GATA3 as a favorable prognostic marker in breast cancer, validating the biological conclusion of Mehra et al. while illustrating the reduced sensitivity of a single-variable analysis on normalized RNA-seq data.
 
-#### age comparison gene vector
-g.a <- c(25, 302,  1847,  2324,  246,  2757, 3222, 3675,  4429,  4430,  4912,  5640, 5835, 5856,  6803,  7229,  7833,  8133, 8579,  8822,  8994, 10101, 11433, 12039, 12353,
-12404, 12442, 67, 88, 100)
