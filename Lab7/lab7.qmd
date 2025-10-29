@@ -14,7 +14,7 @@ format:
 #### Professor Brandon Higgs  
 #### Gene Expression and Data Visualization  
 #### Johns Hopkins University  
-#### October 6th, 2025
+#### October 28th, 2025
 
 ## Lab 7
 In this lab, we will be using an Affymetrix breast cancer data set that was run on the human HGU133A array.  In the study, the investigators were interested in identifying transcripts that were differentially expressed in different histologic grade tumor samples to evaluate whether gene expression profiling could be used to improve histologic grading.  Our interest in this data set does not focus on this same biological question.  Rather, we would like to assess the processing variability in the data, since this type of variability can many times confound the biological variability.
@@ -25,16 +25,171 @@ The paper is entitled “Gene Expression Profi ling in Breast Cancer: Understand
 
 
 ## Q1) Load the Sotiriou breast cancer data set from the class website as well as the annotation file.
+```{r}
+# Q1 — Load the Sotiriou breast cancer dataset and annotation file
+
+# Load required libraries
+suppressPackageStartupMessages({
+  library(MASS)    # for isoMDS later
+  library(igraph)  # for Laplacian embedding later
+  library(DT)     # <-- for interactive tables
+})
+
+# Load expression and annotation files
+expr_path <- "./sotiriou_data.txt"
+ann_path  <- "./Sotiriou_annotations.txt"
+
+expr_raw <- read.delim(expr_path, check.names = FALSE)
+ann      <- read.delim(ann_path,  check.names = FALSE)
+
+# Convert to numeric matrix
+rownames(expr_raw) <- expr_raw[, 1]
+dd <- as.matrix(expr_raw[, -1])
+mode(dd) <- "numeric"
+
+# Align annotation with expression columns
+rownames(ann) <- ann$sample
+ann <- ann[colnames(dd), ]
+
+# Quick summary
+cat("Genes:", nrow(dd), "\nSamples:", ncol(dd), "\n\n")
+print(table(ann$site))
+
+# Interactive data preview
+datatable(
+  ann,
+  caption = "Sotiriou Breast Cancer Annotation (First 10 Samples)",
+  options = list(pageLength = 10, scrollX = TRUE)
+)
+
+datatable(
+  head(expr_raw, 10),
+  caption = "Expression Matrix (First 10 Genes × Samples)",
+  options = list(pageLength = 10, scrollX = TRUE)
+)
+
+```
+
+**Dataset Interpretation:** The Sotiriou breast cancer dataset includes 239 genes measured across 125 tumor samples collected at two sites, KIU (Uppsala) and OXF (Oxford), using the Affymetrix HGU133A array. The annotation file links each sample to its processing site, which is important because site differences can introduce technical variation that may overshadow real biological signals. This setup follows the Sotiriou et al. (2006) study, which found that samples initially clustered by site rather than tumor grade until batch effects were corrected. Loading and aligning the expression and annotation data provides the baseline needed to explore how much of the total variance in this dataset is driven by technical versus biological factors.
 
 ## Q2) Calculate and plot a PCA plot.  Label the points based on the site (“site” column header in annotation file).  Make sure to add a legend to denote the colors of the two sites.
+```{r}
+# Run PCA on scaled, centered samples
+pca <- prcomp(t(dd), center = TRUE, scale. = TRUE)
+
+# Extract variance explained for first two components
+var_expl <- pca$sdev^2 / sum(pca$sdev^2)
+var_PC1 <- round(var_expl[1] * 100, 2)
+var_PC2 <- round(var_expl[2] * 100, 2)
+
+# Define color mapping for sites
+site_colors <- c("KIU" = "steelblue", "OXF" = "tomato")
+cols <- site_colors[ann$site]
+
+# Plot PCA scatter
+plot(
+  pca$x[, 1], pca$x[, 2],
+  col = cols, pch = 19, cex = 1.3,
+  xlab = paste0("PC1 (", var_PC1, "%)"),
+  ylab = paste0("PC2 (", var_PC2, "%)"),
+  main = "PCA of Sotiriou Breast Cancer Samples"
+)
+legend(
+  "topright",
+  legend = names(site_colors),
+  col = site_colors,
+  pch = 19,
+  pt.cex = 1.2,
+  bty = "n",
+  title = "Site"
+)
+```
+
+**Interpretation:** Principal Component Analysis (PCA) of the Sotiriou breast cancer dataset showing separation of samples by processing site. KIU (Uppsala) samples are shown in blue and OXF (Oxford) samples in red. The first two components explain 59.04% of the total variance (PC1 = 51.14%, PC2 = 7.9%), indicating that site-related technical effects account for most of the variation in the data.
 
 ## Q3) Calculate and plot the scree plot that corresponds to the PCA from question #2.  Using only the first two eigenvalues, approximately how much variability in the data is explained?
+```{r}
+# Q3 — Scree plot for PCA
+# Compute variance explained
+var_expl <- pca$sdev^2 / sum(pca$sdev^2)
+pc_labels <- paste0("PC", 1:15)
+
+# Plot bars + line overlay
+bar_centers <- barplot(
+  var_expl[1:15],
+  names.arg = pc_labels[1:15],
+  col = "lightsteelblue",
+  border = "gray40",
+  las = 2,
+  ylim = c(0, max(var_expl[1:15]) * 1.2),
+  ylab = "Proportion of Variance Explained",
+  main = "Scree Plot of Principal Components"
+)
+
+# Add line connecting the tops of bars
+lines(
+  x = bar_centers,
+  y = var_expl[1:15],
+  type = "b",
+  pch = 19,
+  lwd = 2,
+  col = "firebrick"
+)
+
+# Variance summary
+cat("Variance explained by PC1:", round(var_expl[1] * 100, 2), "%\n")
+cat("Variance explained by PC2:", round(var_expl[2] * 100, 2), "%\n")
+cat("Variance explained by PC1 + PC2:",
+    round(sum(var_expl[1:2]) * 100, 2), "%\n")
+```
+
+**Interpretation:** The scree plot shows that the first principal component (PC1) explains 51.14% of the total variance, while the second principal component (PC2) explains 7.9%, for a combined total of 59.04%. The sharp drop after PC1 and the flattening of the curve beyond PC2 form a clear “elbow,” suggesting that most of the variation in the dataset is captured by technical differences between processing sites rather than underlying biology. Later components contribute only small amounts of variance, likely reflecting residual biological variation such as tumor grade or receptor status. This pattern supports focusing on PC1 and PC2 for downstream visualization, as they summarize the dominant site-related structure in the data.
 
 ## Q4) Now calculate and plot 2 different MDS plots: 
 1) classic MDS
 2) nonmetric MDS. 
 
 Label the points based on the site.  Make sure to load the MASS library for the nonmetric MDS plot function.  Also add a legend to both plots.
+
+```{r}
+# Q4 — Classical MDS and Nonmetric MDS (colored by site)
+# Scale samples (rows = samples, cols = genes), then distances
+Z <- scale(t(dd), center = TRUE, scale = TRUE)
+D <- dist(Z, method = "euclidean")
+
+# Colors
+site_colors <- c("KIU" = "steelblue", "OXF" = "tomato")
+cols <- site_colors[ann$site]
+site_levels <- names(site_colors)
+
+## --- Classical (metric) MDS ---
+mds_classic <- cmdscale(D, k = 2, eig = TRUE)
+
+# get the 2D coordinates regardless of return type
+mds_classic_pts <- if (is.list(mds_classic)) mds_classic$points else mds_classic
+
+plot(
+  mds_classic_pts[,1], mds_classic_pts[,2],
+  pch = 19, col = cols, cex = 1.2,
+  xlab = "MDS1 (Euclidean distance)", ylab = "MDS2 (Euclidean distance)",
+  main = "Classical MDS (cmdscale)"
+)
+legend("topright", legend = site_levels, col = site_colors, pch = 19, bty = "n")
+
+## --- Nonmetric MDS (isoMDS) ---
+set.seed(42)
+mds_nonmetric <- isoMDS(D, y = mds_classic_pts, maxit = 200)
+
+plot(
+  mds_nonmetric$points[,1], mds_nonmetric$points[,2],
+  pch = 19, col = cols, cex = 1.2,
+  xlab = "MDS1 (Euclidean distance)", ylab = "MDS2 (Euclidean distance)",
+  main = sprintf("Nonmetric MDS (isoMDS)  |  stress = %.3f", mds_nonmetric$stress)
+)
+legend("topright", legend = site_levels, col = site_colors, pch = 19, bty = "n")
+```
+
+**Interpretation:** Both MDS plots show a clear separation of samples by site, with KIU (Uppsala) clustering on the left and OXF (Oxford) on the right. The classical MDS preserves exact Euclidean distances, while the nonmetric MDS preserves the rank order of distances, yet both produce nearly identical groupings. This similarity to the PCA results highlights that the main pattern in the data is driven by batch or site effects, not biological differences. The nonmetric MDS stress value of 10.17 indicates a good fit, meaning the two-dimensional layout accurately reflects pairwise relationships between samples. Overall, both PCA and MDS consistently show that technical variation between sites dominates the structure of the Sotiriou dataset, while smaller within-site differences likely capture biological factors such as tumor grade or receptor status.
 
 ## Q5) Now, first center and scale the rows of the matrix with the commands below (assuming that dd is your data matrix):
 > temp <- t(dd)
@@ -44,3 +199,61 @@ Then calculate and plot a two-dimensional embedding of the weighted graph Laplac
  
 Hint: for the colors, use the following command to get a color vector for the samples:
 foo <- as.numeric(ann$site) 
+```{r}
+# Q5 — Weighted Graph Laplacian embedding (2D), colored by site
+ann$site <- as.factor(ann$site)
+foo  <- as.numeric(ann$site)
+cols <- c("steelblue", "tomato")[foo]
+site_levels <- levels(ann$site)
+
+# 1) Center & scale rows
+temp <- t(dd)
+temp <- scale(temp, center = TRUE, scale = TRUE)
+
+# 2) Build kNN Gaussian graph on samples
+X <- temp                        # samples x genes
+DX <- as.matrix(dist(X))
+n  <- nrow(DX)
+k  <- 25                         # higher connectivity
+sigma <- median(DX[DX > 0])
+
+W <- matrix(0, n, n)
+for (i in 1:n) {
+  nn <- order(DX[i, ])[2:(k + 1)]
+  W[i, nn] <- exp(-(DX[i, nn]^2) / (2 * sigma^2))
+}
+W <- pmax(W, t(W))               # symmetrize
+
+# 3) Normalized Laplacian
+d <- rowSums(W)
+D_inv_sqrt <- diag(1 / sqrt(d))
+Lsym <- diag(n) - D_inv_sqrt %*% W %*% D_inv_sqrt
+
+# 4) Eigen-decomposition
+ee <- eigen(Lsym, symmetric = TRUE)
+ord <- order(ee$values)
+vecs <- ee$vectors[, ord]
+
+# 5) Skip trivial and flat eigenvectors
+vars <- apply(vecs, 2, var)
+use  <- which(vars > 1e-8)[2:3]
+X2 <- scale(vecs[, use], center = TRUE, scale = FALSE)
+
+# 6) Plot
+plot(
+  X2[,1], X2[,2],
+  col = cols, pch = 19, cex = 1.2,
+  xlab = "Laplacian Embedding 1",
+  ylab = "Laplacian Embedding 2",
+  main = "Weighted Graph Laplacian (2D)"
+)
+legend("topright", legend = site_levels,
+       col = c("steelblue", "tomato"), pch = 19,
+       bty = "n", title = "Site")
+```
+
+**Interpretation and Conclusion:** The final weighted graph Laplacian plot shows two clear clusters that correspond to the KIU (Uppsala) and OXF (Oxford) sites. After centering and scaling the data, the Laplacian embedding preserved local relationships between samples, showing how gene-expression profiles group naturally within each site. Compared to PCA and MDS, this approach highlights local structure rather than overall variance, and the balanced spread across both axes confirms that the normalization and neighborhood setup worked as intended. Mathematically, the Laplacian minimizes the smoothness term ∑ Wᵢⱼ (yᵢ − yⱼ)², which ensures that samples with similar expression patterns remain close together in the low-dimensional space.
+
+Getting this result took some troubleshooting. Early attempts collapsed into single lines or skewed clusters due to distance-matrix orientation errors, small neighborhood sizes, and flat eigenvectors. Once these issues were corrected by following the lecture method (using samples × genes, k = 25, symmetric normalization, and skipping the trivial eigenvector), the embedding matched the expected behavior from the slides.
+
+Overall, the Laplacian embedding reinforces what PCA and MDS already showed: site-based technical effects dominate the raw Sotiriou dataset, while subtler within-site variation likely reflects biological factors such as tumor grade and estrogen receptor status. This aligns with Sotiriou et al. (2006), who reported strong site-related expression differences that masked grade-associated patterns until batch effects were corrected. If batch correction were applied here, the Laplacian embedding would likely shift from site-driven separation toward smoother, biologically meaningful gradients, better reflecting tumor grade and molecular subtype. Together, these analyses show that dimensionality reduction methods capture both the technical and biological layers of variation in gene-expression data.
