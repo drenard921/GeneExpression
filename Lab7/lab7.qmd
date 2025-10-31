@@ -200,60 +200,82 @@ Then calculate and plot a two-dimensional embedding of the weighted graph Laplac
 Hint: for the colors, use the following command to get a color vector for the samples:
 foo <- as.numeric(ann$site) 
 ```{r}
-# Q5 — Weighted Graph Laplacian embedding (2D), colored by site
+# # Q5 — Weighted Graph Laplacian embedding (2D), colored by site
 ann$site <- as.factor(ann$site)
 foo  <- as.numeric(ann$site)
 cols <- c("steelblue", "tomato")[foo]
 site_levels <- levels(ann$site)
 
+### Spectral Laplacian: 
+
+# # 1) Center & scale rows
+# temp <- t(dd)
+# temp <- scale(temp, center = TRUE, scale = TRUE)
+
+# # 2) Build kNN Gaussian graph on samples
+# X <- temp                        # samples x genes
+# DX <- as.matrix(dist(X))
+# n  <- nrow(DX)
+# k  <- 25                         # higher connectivity
+# sigma <- median(DX[DX > 0])
+
+# W <- matrix(0, n, n)
+# for (i in 1:n) {
+#   nn <- order(DX[i, ])[2:(k + 1)]
+#   W[i, nn] <- exp(-(DX[i, nn]^2) / (2 * sigma^2))
+# }
+# W <- pmax(W, t(W))               # symmetrize
+
+# # 3) Normalized Laplacian
+# d <- rowSums(W)
+# D_inv_sqrt <- diag(1 / sqrt(d))
+# Lsym <- diag(n) - D_inv_sqrt %*% W %*% D_inv_sqrt
+
+# # 4) Eigen-decomposition
+# ee <- eigen(Lsym, symmetric = TRUE)
+# ord <- order(ee$values)
+# vecs <- ee$vectors[, ord]
+
+# # 5) Skip trivial and flat eigenvectors
+# vars <- apply(vecs, 2, var)
+# use  <- which(vars > 1e-8)[2:3]
+# X2 <- scale(vecs[, use], center = TRUE, scale = FALSE)
+
+# # 6) Plot
+# plot(
+#   X2[,1], X2[,2],
+#   col = cols, pch = 19, cex = 1.2,
+#   xlab = "Laplacian Embedding 1",
+#   ylab = "Laplacian Embedding 2",
+#   main = "Weighted Graph Laplacian (2D)"
+# )
+# legend("topright", legend = site_levels,
+#        col = c("steelblue", "tomato"), pch = 19,
+#        bty = "n", title = "Site")
+
+
+## proper procedure
+
 # 1) Center & scale rows
 temp <- t(dd)
 temp <- scale(temp, center = TRUE, scale = TRUE)
 
-# 2) Build kNN Gaussian graph on samples
-X <- temp                        # samples x genes
-DX <- as.matrix(dist(X))
-n  <- nrow(DX)
-k  <- 25                         # higher connectivity
-sigma <- median(DX[DX > 0])
-
-W <- matrix(0, n, n)
-for (i in 1:n) {
-  nn <- order(DX[i, ])[2:(k + 1)]
-  W[i, nn] <- exp(-(DX[i, nn]^2) / (2 * sigma^2))
-}
-W <- pmax(W, t(W))               # symmetrize
-
-# 3) Normalized Laplacian
-d <- rowSums(W)
-D_inv_sqrt <- diag(1 / sqrt(d))
-Lsym <- diag(n) - D_inv_sqrt %*% W %*% D_inv_sqrt
-
-# 4) Eigen-decomposition
-ee <- eigen(Lsym, symmetric = TRUE)
-ord <- order(ee$values)
-vecs <- ee$vectors[, ord]
-
-# 5) Skip trivial and flat eigenvectors
-vars <- apply(vecs, 2, var)
-use  <- which(vars > 1e-8)[2:3]
-X2 <- scale(vecs[, use], center = TRUE, scale = FALSE)
-
-# 6) Plot
-plot(
-  X2[,1], X2[,2],
-  col = cols, pch = 19, cex = 1.2,
-  xlab = "Laplacian Embedding 1",
-  ylab = "Laplacian Embedding 2",
-  main = "Weighted Graph Laplacian (2D)"
-)
-legend("topright", legend = site_levels,
-       col = c("steelblue", "tomato"), pch = 19,
-       bty = "n", title = "Site")
+DX2 <- as.matrix(dist(temp))^2
+eps <- as.numeric(quantile(DX2[DX2 > 0], 0.005))  # ε from quantile
+K1  <- exp(-DX2 / eps); diag(K1) <- 0
+d <- rowSums(K1)
+Dih <- diag(1/sqrt(d))
+L <- Dih %*% K1 %*% Dih
+U <- svd(L)$u
+Y <- U / sqrt(rowSums(U^2))
+phi <- Y[, 1:2]
+plot(phi[,1], phi[,2], col=cols, pch=19, cex=1.2,
+     xlab="phi1", ylab="phi2", main="Weighted Graph Laplacian")
+legend("topright", legend=site_levels, col=c("steelblue","tomato"), pch=19, bty="n")
 ```
 
-**Interpretation and Conclusion:** The final weighted graph Laplacian plot shows two clear clusters that correspond to the KIU (Uppsala) and OXF (Oxford) sites. After centering and scaling the data, the Laplacian embedding preserved local relationships between samples, showing how gene-expression profiles group naturally within each site. Compared to PCA and MDS, this approach highlights local structure rather than overall variance, and the balanced spread across both axes confirms that the normalization and neighborhood setup worked as intended. Mathematically, the Laplacian minimizes the smoothness term ∑ Wᵢⱼ (yᵢ − yⱼ)², which ensures that samples with similar expression patterns remain close together in the low-dimensional space.
+**Interpretation and Conclusion:** The weighted graph Laplacian plot shows two clear clusters that match the KIU (Uppsala) and OXF (Oxford) processing sites. After centering and scaling the data, the embedding separates samples primarily by site, showing that technical variation explains most of the structure in the dataset. Compared to PCA and MDS, the Laplacian focuses on local relationships rather than total variance, which helps preserve sample proximity within each site.
 
-Getting this result took some troubleshooting. Early attempts collapsed into single lines or skewed clusters due to distance-matrix orientation errors, small neighborhood sizes, and flat eigenvectors. Once these issues were corrected by following the lecture method (using samples × genes, k = 25, symmetric normalization, and skipping the trivial eigenvector), the embedding matched the expected behavior from the slides.
+While coding this step, I tried to recreate the Laplacian manually in base R instead of using the k.speClust2() function from the lecture. In doing so, I accidentally implemented the normalized spectral clustering version of the Laplacian (I - D^-1/2 W D^-1/2) instead of the lecture’s kernel form (D^-1/2 K D^-1/2). Both produce separation patterns but differ in scaling. The code for my original plot looked skewed before I adjusted the distance matrix and normalization to match our procedure.
 
-Overall, the Laplacian embedding reinforces what PCA and MDS already showed: site-based technical effects dominate the raw Sotiriou dataset, while subtler within-site variation likely reflects biological factors such as tumor grade and estrogen receptor status. This aligns with Sotiriou et al. (2006), who reported strong site-related expression differences that masked grade-associated patterns until batch effects were corrected. If batch correction were applied here, the Laplacian embedding would likely shift from site-driven separation toward smoother, biologically meaningful gradients, better reflecting tumor grade and molecular subtype. Together, these analyses show that dimensionality reduction methods capture both the technical and biological layers of variation in gene-expression data.
+Overall, the result still supports the same biological conclusion reported by Sotiriou et al. (2006): site-related technical effects dominate before batch correction. With correction applied, the embedding would likely reveal more subtle, biologically meaningful variation related to tumor grade or receptor status.
