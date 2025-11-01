@@ -1,0 +1,49 @@
+---
+title: "HW3 Gene Expression"
+Author: "Dylan Renard"
+output: pdf_document
+format:
+  html:
+    toc: true
+    code-fold: show
+    self-contained: true
+  pdf: default
+---
+
+#### Dylan Renard  
+#### Professor Brandon Higgs  
+#### Gene Expression and Data Visualization  
+#### Johns Hopkins University  
+#### November 1st, 2025
+
+
+### Q1) Load the golub data training set in the multtest library.  Also load Biobase and annotate libraries, if they are not loaded with the multtest library.  Remember that the golub data training set is in the multtest library, so see the help file for information on this data set (2.5 pts)
+
+
+### Q2) Cast the matrix to a data frame and label the gene names as numbers (e.g. “g1”,”g2”,etc). (2.5 pts)
+
+### Q3) Get the sample labels (see lecture notes) and set the sample labels to the data frame. (2.5 pts)
+
+### Q4) Use the t-test function in the lecture #7 notes and modify it to "wilcox.test" instead of "t.test".  Change the "$p.value" argument to "$statistic".  Assign the following arguments to the function: (2.5 pts)
+>exact=F
+>alternative="two.sided"
+>correct=T
+
+Run the function on all of the genes in the dataset and >save it as "original.wmw.run"
+
+
+### Q5) Now write a for loop to iterate 500 times, where in each iteration, the columns of the data frame are shuffled (class labels mixed up), the WMW test is calculated on all of the genes, and the maximum test statistic (W) is saved in a list.  (5 pts)
+
+**Hints:** 
+Use sample() to sample the number of columns
+Get the maximum test statistic across all genes with max()
+
+
+### Q6) Once you have the list of maximum test statistics, get the 95% value test statistic.  Subset the original.wmw.run list of values with only those that have a higher test statistic than the 95% value that you calculated.  Print the gene names and test statistics out. (5 pts)
+
+### Q7) Now we want to compare these results to those using the empirical Bayes method in the limma package.  Load this library and calculate p-values for the same dataset using the eBayes() function. (5 pts)
+
+### Q8) Sort the empirical Bayes p-values and acquire the lowest n p-values, where n is defined as the number of significant test statistics that you found in problem 6.  Intersect the gene names for your two methods and report how many are in common between the two differential expression methods, when choosing the top n genes from each set. (2.5 pts)
+
+### Q9) Finally, compare the results from a Student’s t-test with the empirical Bayes method.  To do this, first calculate a two sample (two-tailed) Student’s t-test on all genes.  Make sure that you are running a Student’s t-test and not a Welch’s t-test.  Then extract only those genes with a p-value less than 0.01 from this test.  Plot the gene p-values<0.01 for the Student’s t-test vs. the same genes in the empirical Bayes method.  Make sure to label the axes and title appropriately. (7.5 pts)
+
