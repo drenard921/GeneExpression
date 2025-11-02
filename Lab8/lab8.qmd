@@ -24,18 +24,278 @@ The analysis that you will conduct is based on clustering methods.  The first pr
 
 
 #### Q1) Load the fibroEset library and data set.  Obtain the classifications for the samples.
+```{r}
+  suppressPackageStartupMessages({
+    library(fibroEset)
+    library(DT)
+    library(dendextend)
+    library(Biobase)
+    library(pheatmap)
+    library(ggplot2)
+  })
+  
+  data(fibroEset)
+
+  # Extract the expression matrix
+expr_matrix <- exprs(fibroEset)
+
+# Display the first few rows (genes) and columns (samples)
+datatable(
+  head(expr_matrix[, 1:6]),   # first 6 samples for readability
+  options = list(pageLength = 5, scrollX = TRUE),
+  caption = "Preview of fibroEset Expression Data (first 6 samples)"
+)
+```
+
 
 
 #### Q2) Select a random set of 50 genes from the data frame, and subset the data frame.
+```{r}
+# For reproducibility, set a seed
+set.seed(42)
+
+# Randomly sample 50 gene indices
+random_genes <- sample(1:nrow(expr_matrix), 50)
+
+# Subset the expression data to those genes
+subset_data <- expr_matrix[random_genes, ]
+
+# Inspect dimensions and preview
+dim(subset_data)
+datatable(
+  subset_data[, 1:6],
+  options = list(pageLength = 5, scrollX = TRUE),
+  caption = "Randomly Selected 50 Genes (first 6 samples)"
+)
+```
+
 
 #### Q3) Run and plot hierarchical clustering of the samples using manhattan distance metric and median linkage method.  Make sure that the sample classification labels are along the x-axis.  Title the plot.
+```{r fig.align='center', fig.width=18, fig.height=14, out.width='100%', out.height='80vh'}
+cache_dir <- "cache"; if (!dir.exists(cache_dir)) dir.create(cache_dir, TRUE)
+subset_rds <- file.path(cache_dir, "subset_50genes.rds")
+if (file.exists(subset_rds)) {
+subset_data <- readRDS(subset_rds)
+} else {
+set.seed(42)
+X <- exprs(fibroEset)
+subset_data <- X[sample(seq_len(nrow(X)), 50), , drop = FALSE]
+saveRDS(subset_data, subset_rds)
+}
+
+pd <- pData(fibroEset)
+samp <- colnames(subset_data)
+is_hgb_col <- function(v){
+u <- unique(na.omit(trimws(toupper(as.character(v)))))
+length(u) > 0 && all(u %in% c("H","G","B"))
+}
+hgb_col <- if (ncol(pd)) names(pd)[vapply(pd, is_hgb_col, logical(1))] else character(0)
+
+if (length(hgb_col) > 0) {
+code <- toupper(trimws(as.character(pd[[hgb_col[1]]])))
+} else {
+tok <- function(L) grepl(paste0("(^|[^A-Za-z])", L, "([^A-Za-z]|$)"), samp, ignore.case = TRUE)
+code <- ifelse(tok("H"), "H", ifelse(tok("G"), "G", ifelse(tok("B"), "B", NA_character_)))
+}
+if (anyNA(code)) stop("Q3: Some samples lack H/G/B. Add H/G/B column or label sample names accordingly.")
+
+map_hgb <- c(H="Human", G="Gorilla", B="Bonobo")
+species <- factor(map_hgb[code], levels = c("Human","Gorilla","Bonobo"))
+
+d <- dist(t(subset_data), method = "manhattan")
+hc <- hclust(d, method = "median")
+den <- as.dendrogram(hc)
+
+leaf0 <- labels(den)
+grp_rank <- as.integer(factor(species[match(leaf0, colnames(subset_data))], levels = levels(species)))
+den <- rotate(den, order = leaf0[order(grp_rank, order.dendrogram(den))])
+
+leaf <- labels(den)
+sp_leaf <- species[match(leaf, colnames(subset_data))]
+inits <- c(Human="H", Gorilla="G", Bonobo="B")[as.character(sp_leaf)]
+labels(den) <- paste0(sprintf("%02d", match(leaf, colnames(subset_data))), " | ", inits)
+
+den <- den |>
+ladderize() |>
+hang.dendrogram(hang = 0.08) |>
+set("labels_cex", 1.0) |>
+set("labels_col", "black") |>
+set("branches_lwd", 1.25) |>
+set("branches_col", "black") |>
+set("leaves_pch", NA)
+
+par(mar = c(16, 5, 6, 2), xpd = NA, cex.main = 1.35, yaxs = "i")
+min_h <- min(0, min(hc$height, na.rm = TRUE))
+max_h <- max(hc$height, na.rm = TRUE)
+pad <- 0.05 * (max_h - min_h)
+ylim <- c(min_h - pad, max_h + pad)
+
+plot(
+den, horiz = FALSE,
+main = "Hierarchical Clustering of Samples (Manhattan distance, Median linkage)",
+ylab = "Height", xlab = "Samples",
+ylim = ylim
+)
+legend("topleft", bty = "n",
+legend = c("H = Human", "G = Gorilla", "B = Bonobo"),
+cex = 1.05)
+```
+
+**Interpretation:** Following the approach from Lecture 9, this hierarchical clustering (Manhattan distance, median linkage) groups samples based on overall similarity in their gene-expression profiles. The Manhattan metric emphasizes absolute differences across genes rather than squared deviations, which helps preserve local variation between related samples. As seen in the dendrogram, most Human (H) samples cluster tightly at low heights, showing strong within-group similarity, while Gorillas (G) and Bonobos (B) form their own mid- to high-level branches. Bonobos occasionally cluster closer to Humans than Gorillas do, which matches the expected evolutionary relationships discussed in Lecture 9 since Humans and Bonobos share a more recent common ancestor. The higher linkage heights (above about 6000) represent larger dissimilarities, likely reflecting outlier samples or cross-species variation. Overall, the results align with the lecture concept that both distance metric and linkage choice influence how clusters form, and that biological structure, in this case species relationships, can still be recovered despite noise in gene-level data.
 
 #### Q4) Now both run hierarchical clustering and plot the results in two dimensions (on samples and genes).  Plot a heatmap with the genes on the y-axis and samples on the x-axis.  Once again, make sure that the sample and genes labels are present.  Title the plot.
+```{r fig.align='center', fig.width=16, fig.height=12, out.width='100%'}
+# Q4: Hierarchical clustering on samples & genes; heatmap on the 50 selected genes
+stopifnot(exists("subset_data"))
+mat <- as.matrix(subset_data)
+
+# Build annotation for species (reuse from Q3)
+if (exists("species") && length(species) == ncol(mat)) {
+  ann_col <- data.frame(Species = species)
+  rownames(ann_col) <- colnames(mat)
+} else {
+  pd <- Biobase::pData(fibroEset)
+  samp <- colnames(mat)
+  is_hgb_col <- function(v){
+    u <- unique(na.omit(trimws(toupper(as.character(v)))))
+    length(u) > 0 && all(u %in% c("H","G","B"))
+  }
+  hgb_col <- if (ncol(pd)) names(pd)[vapply(pd, is_hgb_col, logical(1))] else character(0)
+  if (length(hgb_col) > 0) {
+    code <- toupper(trimws(as.character(pd[[hgb_col[1]]])))
+  } else {
+    tok <- function(L) grepl(paste0("(^|[^A-Za-z])", L, "([^A-Za-z]|$)"), samp, ignore.case = TRUE)
+    code <- ifelse(tok("H"), "H", ifelse(tok("G"), "G", ifelse(tok("B"), "B", NA_character_)))
+  }
+  map_hgb <- c(H="Human", G="Gorilla", B="Bonobo")
+  species <- factor(map_hgb[code], levels = c("Human","Gorilla","Bonobo"))
+  ann_col <- data.frame(Species = species)
+  rownames(ann_col) <- colnames(mat)
+}
+
+# Color palette
+cols <- colorRampPalette(c("navy", "white", "firebrick3"))(255)
+
+# Create the heatmap and store as object
+heat <- pheatmap::pheatmap(
+  mat,
+  color = cols,
+  clustering_distance_rows = "manhattan",
+  clustering_distance_cols = "manhattan",
+  clustering_method = "median",
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  annotation_col = ann_col,
+  main = "Heatmap of 50 Genes with Hierarchical Clustering (Manhattan, median linkage)",
+  fontsize_row = 6,
+  fontsize_col = 8,
+  border_color = NA
+)
+```
+
+**Interpretation:**
+This heatmap visualizes hierarchical clustering on both genes and samples using the Manhattan distance metric with median linkage. Each cell represents the expression intensity of one gene in one sample. The dendrograms indicate that samples cluster primarily by species, with Humans (red), Gorillas (green), and Bonobos (blue) forming distinct branches. Gene clusters along the y-axis show subsets of transcripts that vary in coordinated expression across species. The two-dimensional layout highlights both within-species consistency and cross-species differences, supporting the patterns observed in the sample dendrogram from Q3.
 
 #### Q5) Calculate PCA on the samples and retain the first two components vectors (eigenfunctions).  Calculate k-means clustering on these first two components with k=3.
 
+```{r Q5-PCA-kmeans, fig.align='center'}
+# Q5: PCA on samples and k-means clustering (k = 3)
+
+# Ensure the subset data exists
+stopifnot(exists("subset_data"))
+mat <- as.matrix(subset_data)
+
+# Transpose so samples are rows and genes are columns
+sample_matrix <- t(mat)
+
+# Run PCA
+pca_result <- prcomp(sample_matrix, center = TRUE, scale. = TRUE)
+
+# Extract the first two principal components
+pca_df <- as.data.frame(pca_result$x[, 1:2])
+colnames(pca_df) <- c("PC1", "PC2")
+
+# Run k-means clustering on the first two components
+set.seed(42)
+kmeans_result <- kmeans(pca_df, centers = 3, nstart = 25)
+
+# Add cluster assignments to the PCA data
+pca_df$Cluster <- as.factor(kmeans_result$cluster)
+
+# Optional: Add true species labels (for later comparison in Q6)
+if (exists("species")) {
+  pca_df$Species <- species
+} else {
+  pca_df$Species <- NA
+}
+
+# View PCA variance explained
+explained_var <- summary(pca_result)$importance[2, 1:2]
+cat("Proportion of variance explained by PC1 and PC2:\n")
+print(round(explained_var * 100, 2))
+
+# Preview the PCA + cluster assignments
+head(pca_df)
+```
+
+**Interpretation:** The PCA reduced the 50-gene expression data to two principal components that together explain about 21.6% of the total variance (PC1 = 12.17%, PC2 = 9.46%). These two components capture the largest sources of variation across samples, compressing complex gene-expression patterns into a 2D space suitable for clustering. The k-means algorithm with k = 3 was then applied to the first two principal components to identify three major sample groupings, corresponding to the expected number of species. The previewed assignments show that the Bonobo samples primarily fall into the same cluster (Cluster 2), suggesting the PCA and k-means combination successfully separated at least one species group. Although the total variance explained by PC1 and PC2 is modest, meaning that much of the gene expression variation lies in higher components, the low-dimensional projection still captures biologically meaningful structure consistent with species differences.
+
 #### Q6) Plot a two-dimensional scatter plot of the sample classification labels, embedded with the first two eigenfunctions (from PCA).  Color the labels with the color that corresponds to the predicted cluster membership.  Make sure to label the axes and title the plot.
+```{r Q6-PCA-scatter, fig.align='center', fig.width=10, fig.height=8, out.width='85%'}
+# Q6: 2D scatter of samples on PC1/PC2
+# Colors = predicted k-means Cluster; Text labels = true species (H/G/B)
+
+stopifnot(exists("pca_df"))  # created in Q5
+stopifnot(all(c("PC1","PC2","Cluster") %in% names(pca_df)))
+
+# Derive one-letter label for species; if Species not available, fall back to sample names
+if (!"Species" %in% names(pca_df) || all(is.na(pca_df$Species))) {
+  lab_vec <- substr(colnames(subset_data), 1, 1)  # crude fallback
+} else {
+  sp_map <- c(Human="H", Gorilla="G", Bonobo="B")
+  lab_vec <- sp_map[as.character(pca_df$Species)]
+}
+plot_df <- cbind(pca_df, Label = lab_vec, Sample = colnames(subset_data))
 
 
+ggplot(plot_df, aes(x = PC1, y = PC2, color = Cluster, label = Label)) +
+  geom_hline(yintercept = 0, linewidth = 0.2) +
+  geom_vline(xintercept = 0, linewidth = 0.2) +
+  geom_text(size = 5, alpha = 0.9) +
+  labs(
+    title = "Samples Embedded on First Two PCs\nLabels = Species (H/G/B), Color = k-means Cluster (k=3)",
+    x = "PC1",
+    y = "PC2",
+    color = "Predicted Cluster"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "right"
+  )
+
+# Build a single confusion matrix comparing predicted vs actual species
+conf_mat <- table(Predicted_Cluster = pca_df$Cluster,
+                  Actual_Species = pca_df$Species)
+
+# Display a clean DT table (no search bar or paging)
+datatable(
+  as.data.frame.matrix(conf_mat),
+  caption = "Confusion Matrix: Predicted Cluster vs Actual Species",
+  options = list(dom = 't', paging = FALSE, searching = FALSE, info = FALSE)
+)
+```
+
+**Overall Interpretation and Conclusion:**
+
+Across all analyses, the clustering results consistently reflect the expected biological relationships between Humans, Gorillas, and Bonobos. The hierarchical clustering using Manhattan distance and median linkage (Q3–Q4) revealed that most samples grouped according to species, with Humans and Bonobos occasionally clustering closer together due to their evolutionary similarity. The heatmap of the 50 randomly selected genes further emphasized that species identity drives the dominant expression differences across samples.
+
+The PCA results (Q5) reduced the complex gene-expression data into two principal components that captured roughly 21.6% of the total variance. While this modest percentage suggests that additional components also contribute to species separation, the first two principal components already revealed clear biological structure. Applying k-means clustering with 
+𝑘
+=
+3
+k=3 (Q6) produced three main clusters, which aligned closely with species membership. The confusion matrix confirmed that all Bonobo samples grouped cleanly together, while Humans and Gorillas showed partial overlap, consistent with their more similar transcriptional profiles.
+
+Together, these results demonstrate that even with a small subset of genes, unsupervised clustering methods can effectively recover major biological relationships. The combination of hierarchical clustering, PCA, and k-means supports the Lecture 9 concept that clustering captures meaningful structure in gene-expression data, revealing species-level transcriptional differences that align with known evolutionary patterns.
 
 
