@@ -14,7 +14,7 @@ format:
 #### Professor Brandon Higgs  
 #### Gene Expression and Data Visualization  
 #### Johns Hopkins University  
-#### November 1st, 2025
+#### November 10th, 2025
 
 
 ### Q1) Load the golub data training set in the multtest library.  Also load Biobase and annotate libraries, if they are not loaded with the multtest library.  Remember that the golub data training set is in the multtest library, so see the help file for information on this data set (2.5 pts)
