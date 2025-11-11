@@ -197,6 +197,8 @@ cat("Computed Wilcoxon W for", length(wilcox_stats), "genes.\n")
 range(wilcox_stats)
 ```
 
+**Interpretation** The Wilcoxon rank-sum test compared gene expression between the ALL and AML groups without assuming normality. Each of the 7,130 genes received a W statistic reflecting the strength of group separation. The range of 0 to 288 shows varying degrees of difference across genes, setting the stage for later permutation testing to determine which are truly significant.
+
 ### Q5) Now write a for loop to iterate 500 times, where in each iteration, the columns of the data frame are shuffled (class labels mixed up), the WMW test is calculated on all of the genes, and the maximum test statistic (W) is saved in a list.  (5 pts)
 
 **Hints:** 
@@ -271,6 +273,7 @@ hist(max_W_list, breaks = 30,
 abline(v = W_95, lty = 2)
 ```
 
+**Interpretation** Running 500 label permutations gave a clear picture of what the Wilcoxon test statistics look like when there’s no real difference between the two leukemia classes. The null distribution centers around 254, with most values falling between about 230 and 280, showing what we’d expect from random variation alone. The 95th percentile cutoff of 269.05 sets a practical threshold for identifying unusually high test statistics that are unlikely to occur by chance. This gives us a data-driven way to define significance while accounting for thousands of simultaneous gene tests, instead of relying only on theoretical p-values.
 
 
 ### Q6) Once you have the list of maximum test statistics, get the 95% value test statistic.  Subset the original.wmw.run list of values with only those that have a higher test statistic than the 95% value that you calculated.  Print the gene names and test statistics out. (5 pts)
@@ -304,7 +307,7 @@ sig_df <- sig_df[order(-sig_df$W_Statistic), ]
 if (nrow(sig_df) > 0) {
   datatable(
     sig_df,
-    options = list(pageLength = 10, scrollX = TRUE),
+    options = list(pageLength = 22, scrollX = TRUE),
     caption = sprintf(
       "Significant Genes (W > %.2f) — Top %d of %d total",
       W_95, min(10, nrow(sig_df)), nrow(sig_df)
@@ -314,6 +317,10 @@ if (nrow(sig_df) > 0) {
   cat("No genes exceeded the 95th percentile threshold.\n")
 }
 ```
+
+**Interpretation**
+Using the 95th percentile cutoff from the permutation null (W = 269.05), 22 genes showed Wilcoxon statistics above this threshold, meaning they’re unlikely to appear by chance. These genes represent the strongest expression differences between the ALL and AML samples. The top hits, such as g5773 and g2355, have the largest W values, suggesting strong and consistent separation between classes. This filtered list now highlights the most confidently differentially expressed genes based on the empirical significance threshold.
+
 
 ### Q7) Now we want to compare these results to those using the empirical Bayes method in the limma package.  Load this library and calculate p-values for the same dataset using the eBayes() function. (5 pts)
 ```{r}
@@ -347,15 +354,19 @@ limma_df <- limma_df[order(limma_df$p_value), ]
 cat("Number of genes tested:", nrow(limma_df), "\n")
 cat("Genes with adj p < 0.05:", sum(limma_df$adj_p_BH < 0.05), "\n")
 
-# Interactive table (top 10)
+# Interactive table (top 22)
 datatable(
-  head(limma_df, 10),
-  options = list(pageLength = 10, scrollX = TRUE),
+  head(limma_df, 22),
+  options = list(pageLength = 22, scrollX = TRUE),
   caption = "Top 10 genes from limma eBayes analysis (sorted by p-value)"
 )
 ```
 
+**Interpretation** The empirical Bayes approach in the limma package identified a large number of significantly differentially expressed genes between the ALL and AML samples. By borrowing information across all genes, limma stabilizes variance estimates and increases statistical power compared to individual-gene tests. The top hits, such as g3321, g4848, and g2021, show extremely low p-values and high t-statistics, indicating strong and consistent expression differences between groups. Overall, the limma method produces a broader and more confident set of discoveries, reflecting its advantage in small-sample, high-dimensional datasets like this one.
+
 ### Q8) Sort the empirical Bayes p-values and acquire the lowest n p-values, where n is defined as the number of significant test statistics that you found in problem 6.  Intersect the gene names for your two methods and report how many are in common between the two differential expression methods, when choosing the top n genes from each set. (2.5 pts)
+
+
 ```{r}
 ### Q8) Compare top-n genes between Wilcoxon and limma eBayes (robust alignment) ----
 
@@ -427,6 +438,9 @@ if (n > 0) {
 }
 ```
 
+**Interpretation** No overlap was found between the genes identified by the Wilcoxon test and those highlighted by the empirical Bayes approach. This difference comes down to how the two methods treat variability and signal strength. The Wilcoxon test relies only on the ranks of expression values, making it less sensitive to large but consistent differences in mean expression. In contrast, limma models expression magnitudes and applies variance moderation, which boosts power when sample sizes are small. As a result, limma detects many more significant genes, while the rank-based Wilcoxon method flags only the strongest, most distinct shifts. The lack of overlap reflects these methodological differences rather than a coding error.
+
+
 ### Q9) Finally, compare the results from a Student’s t-test with the empirical Bayes method.  To do this, first calculate a two sample (two-tailed) Student’s t-test on all genes.  Make sure that you are running a Student’s t-test and not a Welch’s t-test.  Then extract only those genes with a p-value less than 0.01 from this test.  Plot the gene p-values<0.01 for the Student’s t-test vs. the same genes in the empirical Bayes method.  Make sure to label the axes and title appropriately. (7.5 pts)
 ```{r}
 ### Q9) Compare Student's t-test with empirical Bayes (limma) ----
@@ -481,3 +495,8 @@ if (length(sig_t_idx) > 0) {
   cat("No genes found with Student's t-test p < 0.01.\n")
 }
 ```
+
+**Interpretation and Conclusion**
+The Student’s t-test and limma eBayes results aligned almost perfectly, with most points falling along the diagonal line, showing that both methods capture the same strong expression differences between the ALL and AML groups. This makes sense since limma’s moderated t-statistic extends the classic Student’s t-test by shrinking variances toward a common value, giving more stable and powerful results. The same top genes, like g3321, g4848, and g2021, appeared in both methods, reinforcing their biological relevance.
+
+Beyond the analysis, this lab was genuinely fun because it connected the biology with computational problem solving. Applying R optimization, like parallelizing the permutation test and caching results, made a huge difference in speed and workflow efficiency. It felt similar to the logic used when writing parallelized Nextflow pipelines for sequencing data, thinking in terms of modular, reproducible, and scalable code. The combination of statistical rigor and performance tuning made this lab both technically satisfying and conceptually rewarding.
